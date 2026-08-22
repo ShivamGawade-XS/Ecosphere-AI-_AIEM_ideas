@@ -1,4 +1,4 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, count, desc, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import { nanoid } from "nanoid";
 import {
@@ -9,6 +9,10 @@ import {
   organizations,
   sites,
   sustainabilityReadings,
+  sustainabilityActions,
+  sustainabilityScenarios,
+  type ScenarioAssumptions,
+  type ScenarioResults,
   type InsertUser,
   users,
 } from "../drizzle/schema";
@@ -263,4 +267,155 @@ export async function listIngestionBatches(organizationId: number) {
     .where(eq(ingestionBatches.organizationId, organizationId))
     .orderBy(desc(ingestionBatches.createdAt))
     .limit(25);
+}
+
+export async function listRecentReadings(organizationId: number) {
+  const database = await requireDb();
+  return database
+    .select({ reading: sustainabilityReadings, meter: meters })
+    .from(sustainabilityReadings)
+    .innerJoin(meters, eq(sustainabilityReadings.meterId, meters.id))
+    .where(eq(sustainabilityReadings.organizationId, organizationId))
+    .orderBy(desc(sustainabilityReadings.observedAt))
+    .limit(30);
+}
+
+export async function createSustainabilityAction(input: {
+  organizationId: number;
+  siteId?: number;
+  title: string;
+  description?: string;
+  priority: (typeof import("../drizzle/schema").actionPriorities)[number];
+  expectedCarbonReductionKg?: number;
+  targetDate?: Date;
+  userId: number;
+}) {
+  const database = await requireDb();
+  return database.transaction(async (tx) => {
+    const [created] = await tx
+      .insert(sustainabilityActions)
+      .values({
+        organizationId: input.organizationId,
+        siteId: input.siteId ?? null,
+        title: input.title,
+        description: input.description ?? null,
+        priority: input.priority,
+        ownerUserId: input.userId,
+        expectedCarbonReductionKg: input.expectedCarbonReductionKg?.toFixed(4) ?? null,
+        targetDate: input.targetDate ?? null,
+      })
+      .$returningId();
+    await tx.insert(auditEvents).values({
+      organizationId: input.organizationId,
+      actorUserId: input.userId,
+      eventType: "action.created",
+      resourceType: "sustainability_action",
+      resourceId: String(created.id),
+      payload: { priority: input.priority, siteId: input.siteId ?? null },
+    });
+    return created;
+  });
+}
+
+export async function listSustainabilityActions(organizationId: number) {
+  const database = await requireDb();
+  return database
+    .select()
+    .from(sustainabilityActions)
+    .where(eq(sustainabilityActions.organizationId, organizationId))
+    .orderBy(desc(sustainabilityActions.updatedAt))
+    .limit(50);
+}
+
+export async function updateSustainabilityActionStatus(input: {
+  organizationId: number;
+  actionId: number;
+  status: (typeof import("../drizzle/schema").actionStatuses)[number];
+  userId: number;
+}) {
+  const database = await requireDb();
+  const action = await database
+    .select()
+    .from(sustainabilityActions)
+    .where(and(eq(sustainabilityActions.id, input.actionId), eq(sustainabilityActions.organizationId, input.organizationId)))
+    .limit(1);
+  if (!action[0]) return undefined;
+  await database
+    .update(sustainabilityActions)
+    .set({ status: input.status, completedAt: input.status === "completed" ? new Date() : null })
+    .where(eq(sustainabilityActions.id, input.actionId));
+  await database.insert(auditEvents).values({
+    organizationId: input.organizationId,
+    actorUserId: input.userId,
+    eventType: "action.status_changed",
+    resourceType: "sustainability_action",
+    resourceId: String(input.actionId),
+    payload: { status: input.status },
+  });
+  return { id: input.actionId, status: input.status };
+}
+
+export async function getOperationsOverview(organizationId: number) {
+  const database = await requireDb();
+  const [siteTotal, meterTotal, readingTotal, actionTotal, activeActionTotal, latestReading] = await Promise.all([
+    database.select({ value: count() }).from(sites).where(eq(sites.organizationId, organizationId)),
+    database.select({ value: count() }).from(meters).where(eq(meters.organizationId, organizationId)),
+    database.select({ value: count() }).from(sustainabilityReadings).where(eq(sustainabilityReadings.organizationId, organizationId)),
+    database.select({ value: count() }).from(sustainabilityActions).where(eq(sustainabilityActions.organizationId, organizationId)),
+    database.select({ value: count() }).from(sustainabilityActions).where(and(eq(sustainabilityActions.organizationId, organizationId), eq(sustainabilityActions.status, "in_progress"))),
+    database.select().from(sustainabilityReadings).where(eq(sustainabilityReadings.organizationId, organizationId)).orderBy(desc(sustainabilityReadings.observedAt)).limit(1),
+  ]);
+  return {
+    siteCount: Number(siteTotal[0]?.value ?? 0),
+    meterCount: Number(meterTotal[0]?.value ?? 0),
+    readingCount: Number(readingTotal[0]?.value ?? 0),
+    actionCount: Number(actionTotal[0]?.value ?? 0),
+    activeActionCount: Number(activeActionTotal[0]?.value ?? 0),
+    latestReadingAt: latestReading[0]?.observedAt ?? null,
+  };
+}
+
+export async function createSustainabilityScenario(input: {
+  organizationId: number;
+  siteId?: number;
+  name: string;
+  assumptions: ScenarioAssumptions;
+  results: ScenarioResults;
+  calculationVersion: string;
+  userId: number;
+}) {
+  const database = await requireDb();
+  return database.transaction(async (tx) => {
+    const [created] = await tx
+      .insert(sustainabilityScenarios)
+      .values({
+        organizationId: input.organizationId,
+        siteId: input.siteId ?? null,
+        name: input.name,
+        assumptions: input.assumptions,
+        results: input.results,
+        calculationVersion: input.calculationVersion,
+        createdByUserId: input.userId,
+      })
+      .$returningId();
+    await tx.insert(auditEvents).values({
+      organizationId: input.organizationId,
+      actorUserId: input.userId,
+      eventType: "scenario.saved",
+      resourceType: "sustainability_scenario",
+      resourceId: String(created.id),
+      payload: { calculationVersion: input.calculationVersion, siteId: input.siteId ?? null },
+    });
+    return created;
+  });
+}
+
+export async function listSustainabilityScenarios(organizationId: number) {
+  const database = await requireDb();
+  return database
+    .select()
+    .from(sustainabilityScenarios)
+    .where(eq(sustainabilityScenarios.organizationId, organizationId))
+    .orderBy(desc(sustainabilityScenarios.updatedAt))
+    .limit(30);
 }

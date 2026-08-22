@@ -1,13 +1,25 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { readingSources, resourceTypes } from "../drizzle/schema";
+import { actionPriorities, actionStatuses, readingSources, resourceTypes } from "../drizzle/schema";
 import * as db from "./db";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
 import { COOKIE_NAME } from "../shared/const";
+import { calculateScenario, SCENARIO_CALCULATION_VERSION } from "./domain/scenarios";
 
 const mutableRoles = ["owner", "manager", "operator"] as const;
+const scenarioAssumptionsSchema = z.object({
+  baselineEnergyKwh: z.number().finite().nonnegative().max(999_999_999),
+  baselineWaterM3: z.number().finite().nonnegative().max(999_999_999),
+  baselineWasteKg: z.number().finite().nonnegative().max(999_999_999),
+  energyReductionPct: z.number().finite().min(0).max(100),
+  renewableSharePct: z.number().finite().min(0).max(100),
+  waterReductionPct: z.number().finite().min(0).max(100),
+  wasteReductionPct: z.number().finite().min(0).max(100),
+  recyclingPct: z.number().finite().min(0).max(100),
+  investmentInr: z.number().finite().nonnegative().max(999_999_999),
+});
 
 async function requireOrganizationRole(userId: number, organizationId: number, acceptedRoles?: readonly string[]) {
   const membership = await db.getOrganizationMembership(userId, organizationId);
@@ -121,6 +133,12 @@ export const appRouter = router({
         }
         return db.ingestReading({ ...input, userId: ctx.user.id });
       }),
+    recent: protectedProcedure
+      .input(z.object({ organizationId: z.number().int().positive() }))
+      .query(async ({ ctx, input }) => {
+        await requireOrganizationRole(ctx.user.id, input.organizationId);
+        return db.listRecentReadings(input.organizationId);
+      }),
   }),
 
   ingestion: router({
@@ -129,6 +147,110 @@ export const appRouter = router({
       .query(async ({ ctx, input }) => {
         await requireOrganizationRole(ctx.user.id, input.organizationId);
         return db.listIngestionBatches(input.organizationId);
+      }),
+  }),
+
+  operations: router({
+    overview: protectedProcedure
+      .input(z.object({ organizationId: z.number().int().positive() }))
+      .query(async ({ ctx, input }) => {
+        await requireOrganizationRole(ctx.user.id, input.organizationId);
+        return db.getOperationsOverview(input.organizationId);
+      }),
+  }),
+
+  actions: router({
+    list: protectedProcedure
+      .input(z.object({ organizationId: z.number().int().positive() }))
+      .query(async ({ ctx, input }) => {
+        await requireOrganizationRole(ctx.user.id, input.organizationId);
+        return db.listSustainabilityActions(input.organizationId);
+      }),
+    create: protectedProcedure
+      .input(z.object({
+        organizationId: z.number().int().positive(),
+        siteId: z.number().int().positive().optional(),
+        title: z.string().trim().min(3).max(180),
+        description: z.string().trim().max(5_000).optional(),
+        priority: z.enum(actionPriorities).default("medium"),
+        expectedCarbonReductionKg: z.number().finite().nonnegative().max(999_999_999).optional(),
+        targetDate: z.date().optional(),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        await requireOrganizationRole(ctx.user.id, input.organizationId, mutableRoles);
+        if (input.siteId) {
+          const site = (await db.listSites(input.organizationId)).find((item) => item.id === input.siteId);
+          if (!site) throw new TRPCError({ code: "NOT_FOUND", message: "Site not found in this organization." });
+        }
+        return db.createSustainabilityAction({ ...input, userId: ctx.user.id });
+      }),
+    updateStatus: protectedProcedure
+      .input(z.object({ organizationId: z.number().int().positive(), actionId: z.number().int().positive(), status: z.enum(actionStatuses) }))
+      .mutation(async ({ ctx, input }) => {
+        await requireOrganizationRole(ctx.user.id, input.organizationId, mutableRoles);
+        const result = await db.updateSustainabilityActionStatus({ ...input, userId: ctx.user.id });
+        if (!result) throw new TRPCError({ code: "NOT_FOUND", message: "Action not found in this organization." });
+        return result;
+      }),
+  }),
+
+  intelligence: router({
+    readiness: protectedProcedure
+      .input(z.object({ organizationId: z.number().int().positive() }))
+      .query(async ({ ctx, input }) => {
+        await requireOrganizationRole(ctx.user.id, input.organizationId);
+        const overview = await db.getOperationsOverview(input.organizationId);
+        return {
+          overview,
+          pipeline: [
+            { id: "registry", label: "Meter registry", state: overview.meterCount > 0 ? "ready" : "blocked", evidence: `${overview.meterCount} registered meter${overview.meterCount === 1 ? "" : "s"}` },
+            { id: "readings", label: "Validated readings", state: overview.readingCount > 0 ? "ready" : "waiting", evidence: `${overview.readingCount} persisted reading${overview.readingCount === 1 ? "" : "s"}` },
+            { id: "analytics", label: "Anomaly and forecast worker", state: "planned", evidence: "Requires durable scheduling, model versioning, and alert lifecycle." },
+            { id: "recommendations", label: "Evidence-linked recommendations", state: "planned", evidence: "Requires server analytics output before AI explanation is enabled." },
+          ] as const,
+        };
+      }),
+  }),
+
+  reports: router({
+    summary: protectedProcedure
+      .input(z.object({ organizationId: z.number().int().positive() }))
+      .query(async ({ ctx, input }) => {
+        await requireOrganizationRole(ctx.user.id, input.organizationId);
+        const [overview, recentBatches] = await Promise.all([db.getOperationsOverview(input.organizationId), db.listIngestionBatches(input.organizationId)]);
+        return { overview, recentBatches };
+      }),
+  }),
+
+  scenarios: router({
+    preview: protectedProcedure
+      .input(z.object({ organizationId: z.number().int().positive(), assumptions: scenarioAssumptionsSchema }))
+      .mutation(async ({ ctx, input }) => {
+        await requireOrganizationRole(ctx.user.id, input.organizationId);
+        return { results: calculateScenario(input.assumptions), calculationVersion: SCENARIO_CALCULATION_VERSION };
+      }),
+    save: protectedProcedure
+      .input(z.object({
+        organizationId: z.number().int().positive(),
+        siteId: z.number().int().positive().optional(),
+        name: z.string().trim().min(3).max(180),
+        assumptions: scenarioAssumptionsSchema,
+      }))
+      .mutation(async ({ ctx, input }) => {
+        await requireOrganizationRole(ctx.user.id, input.organizationId, mutableRoles);
+        if (input.siteId) {
+          const site = (await db.listSites(input.organizationId)).find((item) => item.id === input.siteId);
+          if (!site) throw new TRPCError({ code: "NOT_FOUND", message: "Site not found in this organization." });
+        }
+        const results = calculateScenario(input.assumptions);
+        const scenario = await db.createSustainabilityScenario({ ...input, results, calculationVersion: SCENARIO_CALCULATION_VERSION, userId: ctx.user.id });
+        return { scenario, results, calculationVersion: SCENARIO_CALCULATION_VERSION };
+      }),
+    list: protectedProcedure
+      .input(z.object({ organizationId: z.number().int().positive() }))
+      .query(async ({ ctx, input }) => {
+        await requireOrganizationRole(ctx.user.id, input.organizationId);
+        return db.listSustainabilityScenarios(input.organizationId);
       }),
   }),
 

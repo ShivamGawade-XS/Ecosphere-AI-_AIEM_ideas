@@ -21,15 +21,22 @@ import {
 } from "@/components/ui/sidebar";
 import { startLogin } from "@/const";
 import { useIsMobile } from "@/hooks/useMobile";
-import { ClipboardCheck, FileUp, House, LayoutDashboard, LogOut, PanelLeft } from "lucide-react";
-import { CSSProperties, useEffect, useRef, useState } from "react";
+import { BrainCircuit, Building2, Calculator, ClipboardCheck, FileText, FileUp, House, LayoutDashboard, LogOut, PanelLeft, Radar } from "lucide-react";
+import React, { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { DashboardLayoutSkeleton } from './DashboardLayoutSkeleton';
 import { Button } from "./ui/button";
+import EcoSphereMark from "./EcoSphereMark";
 
 const menuItems = [
-  { icon: LayoutDashboard, label: "Readiness control", path: "/app" },
-  { icon: FileUp, label: "Data intake", path: "/app/ingestion" },
+  { icon: LayoutDashboard, label: "Overview", path: "/app" },
+  { icon: Building2, label: "Registry", path: "/app/registry" },
+  { icon: FileUp, label: "Live Data", path: "/app/data" },
+  { icon: BrainCircuit, label: "Intelligence", path: "/app/intelligence" },
+  { icon: Calculator, label: "Scenarios", path: "/app/scenarios" },
+  { icon: ClipboardCheck, label: "Actions", path: "/app/actions" },
+  { icon: FileText, label: "Reports", path: "/app/reports" },
+  { icon: Radar, label: "Readiness", path: "/app/readiness" },
   { icon: House, label: "Public narrative", path: "/" },
 ];
 
@@ -158,7 +165,7 @@ function DashboardLayoutContent({
           className="border-r-0"
           disableTransition={isResizing}
         >
-          <SidebarHeader className="h-16 justify-center">
+          <SidebarHeader className="h-auto justify-center border-b border-border/60 py-3">
             <div className="flex items-center gap-3 px-2 transition-all w-full">
               <button
                 onClick={toggleSidebar}
@@ -169,15 +176,14 @@ function DashboardLayoutContent({
               </button>
               {!isCollapsed ? (
                 <div className="flex items-center gap-2 min-w-0">
-                  <span className="font-semibold tracking-tight truncate">
-                    Navigation
-                  </span>
+                  <div className="sidebar-operations-brand"><EcoSphereMark compact /><span>OPERATIONS INDEX</span></div>
                 </div>
               ) : null}
             </div>
           </SidebarHeader>
 
           <SidebarContent className="gap-0">
+            <div className="sidebar-field-note"><span>AIEM CAMPUS · 2026</span><b>AUTHENTICATED WORKSPACE</b></div>
             <SidebarMenu className="px-2 py-1">
               {menuItems.map(item => {
                 const isActive = location === item.path;
@@ -192,7 +198,7 @@ function DashboardLayoutContent({
                       <item.icon
                         className={`h-4 w-4 ${isActive ? "text-primary" : ""}`}
                       />
-                      <span>{item.label}</span>
+                      <span>{item.label}</span>{isActive && <i className="sidebar-active-dot" aria-hidden="true" />}
                     </SidebarMenuButton>
                   </SidebarMenuItem>
                 );
@@ -201,6 +207,7 @@ function DashboardLayoutContent({
           </SidebarContent>
 
           <SidebarFooter className="p-3">
+            {!isCollapsed && <div className="sidebar-provenance"><span>RECORDS</span><b>TENANT-SCOPED · AUDITED</b></div>}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <button className="flex items-center gap-3 rounded-lg px-1 py-1 hover:bg-accent/50 transition-colors w-full text-left group-data-[collapsible=icon]:justify-center focus:outline-none focus-visible:ring-2 focus-visible:ring-ring">

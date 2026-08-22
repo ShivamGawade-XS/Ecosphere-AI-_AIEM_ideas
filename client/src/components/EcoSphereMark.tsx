@@ -1,3 +1,5 @@
+import React from "react";
+
 /**
  * Field Operations Ledger style: a compact orbital field-marker presentation
  * using the generated transparent EcoSphere symbol and precise brand typography.

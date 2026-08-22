@@ -17,6 +17,33 @@ export const resourceTypes = ["energy", "water", "waste", "fuel", "renewable"] a
 export const readingSources = ["manual", "csv", "api", "connector", "simulated"] as const;
 export const ingestionStatuses = ["processing", "completed", "completed_with_errors", "failed"] as const;
 export const qualityStatuses = ["accepted", "flagged", "rejected"] as const;
+export const actionStatuses = ["proposed", "in_progress", "completed", "archived"] as const;
+export const actionPriorities = ["low", "medium", "high", "critical"] as const;
+export const scenarioStatuses = ["draft", "saved", "archived"] as const;
+
+export type ScenarioAssumptions = {
+  baselineEnergyKwh: number;
+  baselineWaterM3: number;
+  baselineWasteKg: number;
+  energyReductionPct: number;
+  renewableSharePct: number;
+  waterReductionPct: number;
+  wasteReductionPct: number;
+  recyclingPct: number;
+  investmentInr: number;
+};
+
+export type ScenarioResults = {
+  projectedEnergyKwh: number;
+  projectedWaterM3: number;
+  projectedWasteKg: number;
+  baselineCarbonKg: number;
+  projectedCarbonKg: number;
+  carbonReductionKg: number;
+  annualSavingsInr: number;
+  roiPct: number | null;
+  paybackYears: number | null;
+};
 
 export const users = mysqlTable("users", {
   id: int("id").autoincrement().primaryKey(),
@@ -161,9 +188,58 @@ export const auditEvents = mysqlTable(
   (table) => [index("audit_events_org_created_idx").on(table.organizationId, table.createdAt)],
 );
 
+/** Accountable sustainability intervention tracked against an organization and optional site. */
+export const sustainabilityActions = mysqlTable(
+  "sustainability_actions",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    organizationId: int("organizationId").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    siteId: int("siteId").references(() => sites.id, { onDelete: "set null" }),
+    title: varchar("title", { length: 180 }).notNull(),
+    description: text("description"),
+    source: varchar("source", { length: 48 }).notNull().default("manual"),
+    status: mysqlEnum("status", actionStatuses).notNull().default("proposed"),
+    priority: mysqlEnum("priority", actionPriorities).notNull().default("medium"),
+    ownerUserId: int("ownerUserId").references(() => users.id, { onDelete: "set null" }),
+    expectedCarbonReductionKg: decimal("expectedCarbonReductionKg", { precision: 16, scale: 4 }),
+    targetDate: timestamp("targetDate"),
+    completedAt: timestamp("completedAt"),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  (table) => [
+    index("sustainability_actions_org_status_idx").on(table.organizationId, table.status),
+    index("sustainability_actions_site_idx").on(table.siteId),
+  ],
+);
+
+/** Saved, reproducible What-If calculation with its full assumptions and server-owned output. */
+export const sustainabilityScenarios = mysqlTable(
+  "sustainability_scenarios",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    organizationId: int("organizationId").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    siteId: int("siteId").references(() => sites.id, { onDelete: "set null" }),
+    name: varchar("name", { length: 180 }).notNull(),
+    status: mysqlEnum("status", scenarioStatuses).notNull().default("saved"),
+    assumptions: json("assumptions").$type<ScenarioAssumptions>().notNull(),
+    results: json("results").$type<ScenarioResults>().notNull(),
+    calculationVersion: varchar("calculationVersion", { length: 32 }).notNull().default("v1"),
+    createdByUserId: int("createdByUserId").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  (table) => [
+    index("sustainability_scenarios_org_updated_idx").on(table.organizationId, table.updatedAt),
+    index("sustainability_scenarios_site_idx").on(table.siteId),
+  ],
+);
+
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
 export type Organization = typeof organizations.$inferSelect;
 export type Site = typeof sites.$inferSelect;
 export type Meter = typeof meters.$inferSelect;
 export type SustainabilityReading = typeof sustainabilityReadings.$inferSelect;
+export type SustainabilityAction = typeof sustainabilityActions.$inferSelect;
+export type SustainabilityScenario = typeof sustainabilityScenarios.$inferSelect;

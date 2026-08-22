@@ -15,6 +15,20 @@
       "when": 1787370422216,
       "tag": "0001_ambitious_warpath",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1787373941131,
+      "tag": "0002_robust_blizzard",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "5",
+      "when": 1787374333199,
+      "tag": "0003_sparkling_skreet",
+      "breakpoints": true
     }
   ]
 }
