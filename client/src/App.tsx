@@ -1,3 +1,4 @@
+/** Field Operations Ledger style: a single, calm editorial experience for EcoSphere AI. */
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import NotFound from "@/pages/NotFound";
