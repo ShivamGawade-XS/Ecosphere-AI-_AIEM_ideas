@@ -3,7 +3,7 @@
  * Uses field-paper surfaces, moss ink, provenance labels, and chartreuse only
  * as an operational signal. Numerical outputs are explicit modeled estimates.
  */
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import {
   Activity,
   ArrowDownRight,
@@ -42,10 +42,10 @@ const evidence = [
 ];
 
 const interventions = [
-  { title: "Smart HVAC controls", detail: "Prioritize the biggest energy signal first.", score: "1", icon: Zap, tone: "moss" },
-  { title: "LED upgrade", detail: "Reduce controllable lighting load.", score: "2", icon: CloudSun, tone: "paper" },
-  { title: "Rooftop solar", detail: "Add renewable contribution in stages.", score: "3", icon: Leaf, tone: "charcoal" },
-  { title: "Water-saving systems", detail: "Tighten consumption at the meter.", score: "4", icon: Droplets, tone: "sand" },
+  { id: "hvac", title: "Smart HVAC controls", detail: "Prioritize the biggest energy signal first.", score: "1", icon: Zap, tone: "moss", energy: 18, renewable: 0, water: 0, waste: 0, recycling: 0, investment: 400000 },
+  { id: "led", title: "LED upgrade", detail: "Reduce controllable lighting load.", score: "2", icon: CloudSun, tone: "paper", energy: 12, renewable: 0, water: 0, waste: 0, recycling: 0, investment: 300000 },
+  { id: "solar", title: "Rooftop solar", detail: "Add renewable contribution in stages.", score: "3", icon: Leaf, tone: "charcoal", energy: 3, renewable: 35, water: 0, waste: 0, recycling: 0, investment: 800000 },
+  { id: "water", title: "Water-saving systems", detail: "Tighten consumption at the meter.", score: "4", icon: Droplets, tone: "sand", energy: 0, renewable: 0, water: 25, waste: 10, recycling: 10, investment: 250000 },
 ];
 
 function formatINR(value: number) {
@@ -64,7 +64,12 @@ export default function Home() {
   const [activeStage, setActiveStage] = useState("detect");
   const [energyReduction, setEnergyReduction] = useState(15);
   const [renewableShare, setRenewableShare] = useState(20);
+  const [waterReduction, setWaterReduction] = useState(10);
+  const [wasteReduction, setWasteReduction] = useState(10);
+  const [recyclingRate, setRecyclingRate] = useState(25);
   const [investment, setInvestment] = useState(500000);
+  const [selectedIntervention, setSelectedIntervention] = useState("custom");
+  const stageRefs = useRef<Array<HTMLButtonElement | null>>([]);
 
   const active = stages.find((stage) => stage.id === activeStage) ?? stages[1];
   const ActiveIcon = active.icon;
@@ -73,24 +78,68 @@ export default function Home() {
     const baseline = { energy: 9780, water: 1270, waste: 985, carbon: 6420 };
     const annualEnergySaved = baseline.energy * (energyReduction / 100);
     const electricityCarbon = baseline.carbon * 0.72;
+    const waterCarbon = baseline.carbon * 0.12;
+    const wasteCarbon = baseline.carbon * 0.16;
     const directReduction = electricityCarbon * (energyReduction / 100);
     const renewableReduction = electricityCarbon * (1 - energyReduction / 100) * (renewableShare / 100);
-    const carbonReduction = directReduction + renewableReduction;
+    const waterCarbonReduction = waterCarbon * (waterReduction / 100);
+    const wasteCarbonReduction = wasteCarbon * (wasteReduction / 100);
+    const recyclingCarbonReduction = wasteCarbon * (1 - wasteReduction / 100) * (recyclingRate / 100);
+    const carbonReduction = directReduction + renewableReduction + waterCarbonReduction + wasteCarbonReduction + recyclingCarbonReduction;
     const projectedCarbon = Math.max(0, baseline.carbon - carbonReduction);
-    const annualSavings = annualEnergySaved * 9.2 + renewableShare * 1450;
+    const annualWaterSaved = baseline.water * (waterReduction / 100);
+    const divertedWaste = baseline.waste * (1 - wasteReduction / 100) * (recyclingRate / 100);
+    const avoidedWaste = baseline.waste * (wasteReduction / 100) + divertedWaste;
+    const annualSavings = annualEnergySaved * 9.2 + annualWaterSaved * 56 + avoidedWaste * 4.2 + renewableShare * 1450;
     const payback = annualSavings > 0 ? investment / annualSavings : 0;
     const roi = investment > 0 ? ((annualSavings * 3 - investment) / investment) * 100 : 0;
 
     return {
       ...baseline,
       annualEnergySaved,
+      annualWaterSaved,
+      avoidedWaste,
       projectedCarbon,
       carbonReduction,
       annualSavings,
       payback,
       roi,
     };
-  }, [energyReduction, renewableShare, investment]);
+  }, [energyReduction, renewableShare, waterReduction, wasteReduction, recyclingRate, investment]);
+
+  function activateStage(index: number) {
+    setActiveStage(stages[index].id);
+    stageRefs.current[index]?.focus();
+  }
+
+  function handleStageKeyDown(event: React.KeyboardEvent<HTMLButtonElement>, index: number) {
+    let nextIndex: number | null = null;
+    if (event.key === "ArrowRight" || event.key === "ArrowDown") nextIndex = (index + 1) % stages.length;
+    if (event.key === "ArrowLeft" || event.key === "ArrowUp") nextIndex = (index - 1 + stages.length) % stages.length;
+    if (event.key === "Home") nextIndex = 0;
+    if (event.key === "End") nextIndex = stages.length - 1;
+    if (event.key === "Enter" || event.key === " ") nextIndex = index;
+    if (nextIndex !== null) {
+      event.preventDefault();
+      activateStage(nextIndex);
+    }
+  }
+
+  function applyIntervention(intervention: (typeof interventions)[number]) {
+    setEnergyReduction(intervention.energy);
+    setRenewableShare(intervention.renewable);
+    setWaterReduction(intervention.water);
+    setWasteReduction(intervention.waste);
+    setRecyclingRate(intervention.recycling);
+    setInvestment(intervention.investment);
+    setSelectedIntervention(intervention.id);
+    requestAnimationFrame(() => document.getElementById("simulator")?.scrollIntoView({ behavior: "smooth", block: "start" }));
+  }
+
+  function setScenarioValue(setter: (value: number) => void, value: number) {
+    setter(value);
+    setSelectedIntervention("custom");
+  }
 
   return (
     <main className="site-shell">
@@ -193,14 +242,13 @@ export default function Home() {
               <button
                 key={stage.id}
                 className={`process-stop ${selected ? "process-stop--active" : ""}`}
+                ref={(node) => { stageRefs.current[index] = node; }}
                 onClick={() => setActiveStage(stage.id)}
-                onPointerDown={() => setActiveStage(stage.id)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" || event.key === " ") setActiveStage(stage.id);
-                }}
+                onKeyDown={(event) => handleStageKeyDown(event, index)}
                 role="tab"
                 aria-selected={selected}
                 aria-controls="stage-detail"
+                tabIndex={selected ? 0 : -1}
               >
                 <span className="process-index">0{index + 1}</span>
                 <Icon size={18} strokeWidth={1.7} />
@@ -253,17 +301,32 @@ export default function Home() {
             <div className="panel-label"><span>SCENARIO / A</span><span>MODELED</span></div>
             <label className="slider-row">
               <span><b>Energy reduction</b><output>{energyReduction}%</output></span>
-              <input type="range" min="0" max="35" value={energyReduction} onChange={(event) => setEnergyReduction(Number(event.target.value))} />
+              <input type="range" min="0" max="35" value={energyReduction} onChange={(event) => setScenarioValue(setEnergyReduction, Number(event.target.value))} />
               <small>Demand-side action against energy baseline</small>
             </label>
             <label className="slider-row">
               <span><b>Renewable contribution</b><output>{renewableShare}%</output></span>
-              <input type="range" min="0" max="50" value={renewableShare} onChange={(event) => setRenewableShare(Number(event.target.value))} />
+              <input type="range" min="0" max="50" value={renewableShare} onChange={(event) => setScenarioValue(setRenewableShare, Number(event.target.value))} />
               <small>Modeled share of remaining electricity emissions</small>
             </label>
             <label className="slider-row">
+              <span><b>Water reduction</b><output>{waterReduction}%</output></span>
+              <input type="range" min="0" max="40" value={waterReduction} onChange={(event) => setScenarioValue(setWaterReduction, Number(event.target.value))} />
+              <small>Demand-side action against main-water baseline</small>
+            </label>
+            <label className="slider-row">
+              <span><b>Waste reduction</b><output>{wasteReduction}%</output></span>
+              <input type="range" min="0" max="40" value={wasteReduction} onChange={(event) => setScenarioValue(setWasteReduction, Number(event.target.value))} />
+              <small>Modeled source reduction before disposal</small>
+            </label>
+            <label className="slider-row">
+              <span><b>Recycling contribution</b><output>{recyclingRate}%</output></span>
+              <input type="range" min="0" max="60" value={recyclingRate} onChange={(event) => setScenarioValue(setRecyclingRate, Number(event.target.value))} />
+              <small>Modeled share of remaining waste diverted from disposal</small>
+            </label>
+            <label className="slider-row">
               <span><b>Investment</b><output>{formatINR(investment)}</output></span>
-              <input type="range" min="100000" max="1500000" step="50000" value={investment} onChange={(event) => setInvestment(Number(event.target.value))} />
+              <input type="range" min="100000" max="1500000" step="50000" value={investment} onChange={(event) => setScenarioValue(setInvestment, Number(event.target.value))} />
               <small>Transparent scenario input, not a procurement quote</small>
             </label>
             <div className="control-note"><ShieldCheck size={16} /> Numerical source: <b>scenario calculation engine</b></div>
@@ -271,6 +334,10 @@ export default function Home() {
 
           <div className="scenario-output">
             <div className="output-topline"><span>BEFORE → AFTER</span><span className="simulated-tag">SIMULATED RESULT</span></div>
+            <div className="scenario-live-status" role="status" aria-live="polite" aria-atomic="true">
+              <span>{selectedIntervention === "custom" ? "CUSTOM SCENARIO" : `PRESET / ${interventions.find((item) => item.id === selectedIntervention)?.title.toUpperCase()}`}</span>
+              <b>{Math.round(model.carbonReduction).toLocaleString()} kgCO₂e modeled reduction</b>
+            </div>
             <div className="carbon-bar-wrap">
               <div className="carbon-values"><span>{model.carbon.toLocaleString()} kgCO₂e</span><ArrowDownRight size={18}/><strong>{Math.round(model.projectedCarbon).toLocaleString()} kgCO₂e</strong></div>
               <div className="carbon-bar"><span style={{ width: `${Math.min(100, (model.projectedCarbon / model.carbon) * 100)}%` }} /></div>
@@ -278,6 +345,8 @@ export default function Home() {
             </div>
             <div className="output-stat-grid">
               <div><span>ENERGY AVOIDED</span><strong>{Math.round(model.annualEnergySaved).toLocaleString()} <small>kWh/yr</small></strong></div>
+              <div><span>WATER AVOIDED</span><strong>{Math.round(model.annualWaterSaved).toLocaleString()} <small>m³/yr</small></strong></div>
+              <div><span>WASTE AVOIDED</span><strong>{Math.round(model.avoidedWaste).toLocaleString()} <small>kg/yr</small></strong></div>
               <div><span>ANNUAL SAVINGS</span><strong>{formatINR(model.annualSavings)}</strong></div>
               <div><span>PAYBACK</span><strong>{model.payback > 0 ? `${model.payback.toFixed(1)} yrs` : "—"}</strong></div>
               <div><span>3-YEAR ROI</span><strong>{Math.round(model.roi)}<small>%</small></strong></div>
@@ -298,12 +367,19 @@ export default function Home() {
           {interventions.map((item) => {
             const Icon = item.icon;
             return (
-              <article className={`intervention-card intervention-card--${item.tone}`} key={item.title}>
+              <button
+                type="button"
+                className={`intervention-card intervention-card--${item.tone} ${selectedIntervention === item.id ? "intervention-card--selected" : ""}`}
+                key={item.title}
+                onClick={() => applyIntervention(item)}
+                aria-pressed={selectedIntervention === item.id}
+                aria-label={`Apply ${item.title} scenario preset`}
+              >
                 <div className="rank">0{item.score}</div>
                 <Icon size={23} strokeWidth={1.7} />
                 <div><h3>{item.title}</h3><p>{item.detail}</p></div>
                 <ArrowUpRight size={20} />
-              </article>
+              </button>
             );
           })}
         </div>
