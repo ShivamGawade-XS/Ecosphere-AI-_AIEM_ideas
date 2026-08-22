@@ -69,7 +69,10 @@ export default function Home() {
   const [recyclingRate, setRecyclingRate] = useState(25);
   const [investment, setInvestment] = useState(500000);
   const [selectedIntervention, setSelectedIntervention] = useState("custom");
+  const [processingPreset, setProcessingPreset] = useState<string | null>(null);
+  const [processingStatus, setProcessingStatus] = useState("Ready to model an intervention.");
   const stageRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const processingTimer = useRef<number | null>(null);
 
   const active = stages.find((stage) => stage.id === activeStage) ?? stages[1];
   const ActiveIcon = active.icon;
@@ -126,13 +129,22 @@ export default function Home() {
   }
 
   function applyIntervention(intervention: (typeof interventions)[number]) {
-    setEnergyReduction(intervention.energy);
-    setRenewableShare(intervention.renewable);
-    setWaterReduction(intervention.water);
-    setWasteReduction(intervention.waste);
-    setRecyclingRate(intervention.recycling);
-    setInvestment(intervention.investment);
-    setSelectedIntervention(intervention.id);
+    if (processingPreset) return;
+    if (processingTimer.current) window.clearTimeout(processingTimer.current);
+    setProcessingPreset(intervention.id);
+    setProcessingStatus(`Processing ${intervention.title} against the AIEM Campus baseline…`);
+    processingTimer.current = window.setTimeout(() => {
+      setEnergyReduction(intervention.energy);
+      setRenewableShare(intervention.renewable);
+      setWaterReduction(intervention.water);
+      setWasteReduction(intervention.waste);
+      setRecyclingRate(intervention.recycling);
+      setInvestment(intervention.investment);
+      setSelectedIntervention(intervention.id);
+      setProcessingPreset(null);
+      setProcessingStatus(`${intervention.title} preset applied. Modeled outputs updated.`);
+      processingTimer.current = null;
+    }, 720);
     requestAnimationFrame(() => document.getElementById("simulator")?.scrollIntoView({ behavior: "smooth", block: "start" }));
   }
 
@@ -334,9 +346,9 @@ export default function Home() {
 
           <div className="scenario-output">
             <div className="output-topline"><span>BEFORE → AFTER</span><span className="simulated-tag">SIMULATED RESULT</span></div>
-            <div className="scenario-live-status" role="status" aria-live="polite" aria-atomic="true">
-              <span>{selectedIntervention === "custom" ? "CUSTOM SCENARIO" : `PRESET / ${interventions.find((item) => item.id === selectedIntervention)?.title.toUpperCase()}`}</span>
-              <b>{Math.round(model.carbonReduction).toLocaleString()} kgCO₂e modeled reduction</b>
+            <div className={`scenario-live-status ${processingPreset ? "scenario-live-status--processing" : ""}`} role="status" aria-live="polite" aria-atomic="true">
+              <span>{processingPreset ? <><i className="processing-spinner" aria-hidden="true" /> PROCESSING PRESET</> : selectedIntervention === "custom" ? "CUSTOM SCENARIO" : `PRESET / ${interventions.find((item) => item.id === selectedIntervention)?.title.toUpperCase()}`}</span>
+              <b>{processingPreset ? processingStatus : `${Math.round(model.carbonReduction).toLocaleString()} kgCO₂e modeled reduction`}</b>
             </div>
             <div className="carbon-bar-wrap">
               <div className="carbon-values"><span>{model.carbon.toLocaleString()} kgCO₂e</span><ArrowDownRight size={18}/><strong>{Math.round(model.projectedCarbon).toLocaleString()} kgCO₂e</strong></div>
@@ -372,7 +384,9 @@ export default function Home() {
                 className={`intervention-card intervention-card--${item.tone} ${selectedIntervention === item.id ? "intervention-card--selected" : ""}`}
                 key={item.title}
                 onClick={() => applyIntervention(item)}
+                disabled={Boolean(processingPreset)}
                 aria-pressed={selectedIntervention === item.id}
+                aria-busy={processingPreset === item.id}
                 aria-label={`Apply ${item.title} scenario preset`}
               >
                 <div className="rank">0{item.score}</div>
