@@ -77,11 +77,10 @@ async function startServer() {
         return res.status(500).json({ ok: false, taskUid: user.taskUid, organizationId, result });
       }
       return res.json({ ok: true, taskUid: user.taskUid, organizationId, result });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Unknown scheduled monitoring error";
+    } catch (_error) {
       return res.status(500).json({
         ok: false,
-        error: message,
+        error: "scheduled-monitoring-failed",
         context: { path: "/api/scheduled/monitoring" },
         timestamp: new Date().toISOString(),
       });
