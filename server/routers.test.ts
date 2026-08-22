@@ -30,6 +30,19 @@ const database = vi.hoisted(() => ({
   upsertAlertEscalationPolicy: vi.fn(),
   listAlertEscalations: vi.fn(),
   evaluateAlertEscalations: vi.fn(),
+  listSustainabilityForecasts: vi.fn(),
+  generateSustainabilityForecast: vi.fn(),
+  listSustainabilityRecommendations: vi.fn(),
+  generateAnomalyRecommendations: vi.fn(),
+  updateSustainabilityRecommendationStatus: vi.fn(),
+  acceptRecommendationAsAction: vi.fn(),
+  getActionCollaboration: vi.fn(),
+  addActionComment: vi.fn(),
+  addActionEvidence: vi.fn(),
+  listInterventionComparisons: vi.fn(),
+  createInterventionComparison: vi.fn(),
+  listSustainabilityReportSnapshots: vi.fn(),
+  createSustainabilityReportSnapshot: vi.fn(),
 }));
 
 vi.mock("./db", () => database);
@@ -87,6 +100,19 @@ describe("EcoSphere core API", () => {
     database.upsertAlertEscalationPolicy.mockResolvedValue({ id: 6, isEnabled: true, minimumSeverity: "critical", afterMinutes: 60 });
     database.listAlertEscalations.mockResolvedValue([]);
     database.evaluateAlertEscalations.mockResolvedValue({ pendingCreated: 1, triggered: 0, suppressed: 0 });
+    database.listSustainabilityForecasts.mockResolvedValue([]);
+    database.generateSustainabilityForecast.mockResolvedValue({ id: 91, meter: { id: 44 }, forecast: { status: "ready", inputReadingCount: 6 } });
+    database.listSustainabilityRecommendations.mockResolvedValue([]);
+    database.generateAnomalyRecommendations.mockResolvedValue({ created: 1, recommendationIds: [61] });
+    database.updateSustainabilityRecommendationStatus.mockResolvedValue({ id: 61, status: "dismissed" });
+    database.acceptRecommendationAsAction.mockResolvedValue({ actionId: 72, idempotent: false });
+    database.getActionCollaboration.mockResolvedValue({ action: { id: 71, title: "Inspect HVAC" }, comments: [], evidence: [] });
+    database.addActionComment.mockResolvedValue({ id: 13 });
+    database.addActionEvidence.mockResolvedValue({ id: 14 });
+    database.listInterventionComparisons.mockResolvedValue([]);
+    database.createInterventionComparison.mockResolvedValue({ id: 81, results: [], rankingVersion: "scenario-impact-rank-v1" });
+    database.listSustainabilityReportSnapshots.mockResolvedValue([]);
+    database.createSustainabilityReportSnapshot.mockResolvedValue({ id: 101, criteria: {}, evidence: {}, factorDisclosure: "Pilot fallback disclosed." });
     worker.runMonitoringForOrganization.mockResolvedValue({ organizationId: 8, runKey: "manual:test-run", status: "completed", readingsScanned: 1, qualityFindingsCreated: 4, anomaliesCreated: 0, alertsCreated: 0, ecoScoresUpdated: 1, latestEcoScore: 100 });
   });
 
@@ -166,13 +192,40 @@ describe("EcoSphere core API", () => {
     expect(database.createSustainabilityAction).toHaveBeenCalledWith(expect.objectContaining({ organizationId: 8, siteId: 13, userId: 17, priority: "high" }));
   });
 
-  it("reports actual deterministic monitoring readiness and keeps forecasts explicit as planned", async () => {
+  it("reports actual deterministic monitoring readiness and marks deterministic forecast and recommendation services as available", async () => {
     const caller = appRouter.createCaller(createAuthenticatedContext());
     const result = await caller.intelligence.readiness({ organizationId: 8 });
 
     expect(result.pipeline).toContainEqual(expect.objectContaining({ id: "analytics", state: "waiting" }));
-    expect(result.pipeline).toContainEqual(expect.objectContaining({ id: "forecast", state: "planned" }));
+    expect(result.pipeline).toContainEqual(expect.objectContaining({ id: "forecast", state: "ready" }));
+    expect(result.pipeline).toContainEqual(expect.objectContaining({ id: "recommendations", state: "ready" }));
     expect(result.pipeline).toContainEqual(expect.objectContaining({ id: "readings", state: "waiting", evidence: "0 persisted readings" }));
+  });
+
+  it("runs R3 decision-support operations with the authenticated actor and tenant-scoped inputs", async () => {
+    const caller = appRouter.createCaller(createAuthenticatedContext());
+
+    await expect(caller.forecasts.generate({ organizationId: 8, meterId: 44, horizonPoints: 6 })).resolves.toMatchObject({ id: 91, forecast: { status: "ready" } });
+    await expect(caller.recommendations.generateForOpenAnomalies({ organizationId: 8 })).resolves.toEqual({ created: 1, recommendationIds: [61] });
+    await expect(caller.recommendations.acceptAsAction({ organizationId: 8, recommendationId: 61 })).resolves.toEqual({ actionId: 72, idempotent: false });
+    await expect(caller.actions.addComment({ organizationId: 8, actionId: 71, body: "Facilities review scheduled." })).resolves.toEqual({ id: 13 });
+    await expect(caller.actions.addEvidence({ organizationId: 8, actionId: 71, type: "url", label: "Inspection record", reference: "https://records.example.test/hvac" })).resolves.toEqual({ id: 14 });
+    await expect(caller.comparisons.create({ organizationId: 8, name: "HVAC options", scenarioIds: [84, 85] })).resolves.toMatchObject({ id: 81, rankingVersion: "scenario-impact-rank-v1" });
+    await expect(caller.reports.createSnapshot({ organizationId: 8, title: "August evidence" })).resolves.toMatchObject({ id: 101 });
+
+    expect(database.generateSustainabilityForecast).toHaveBeenCalledWith(expect.objectContaining({ organizationId: 8, meterId: 44, userId: 17 }));
+    expect(database.acceptRecommendationAsAction).toHaveBeenCalledWith({ organizationId: 8, recommendationId: 61, userId: 17 });
+    expect(database.addActionComment).toHaveBeenCalledWith(expect.objectContaining({ actionId: 71, userId: 17 }));
+    expect(database.createInterventionComparison).toHaveBeenCalledWith(expect.objectContaining({ scenarioIds: [84, 85], userId: 17 }));
+    expect(database.createSustainabilityReportSnapshot).toHaveBeenCalledWith({ organizationId: 8, title: "August evidence", userId: 17 });
+  });
+
+  it("refuses R3 operations before invoking persistence when the caller has no tenant membership", async () => {
+    database.getOrganizationMembership.mockResolvedValueOnce(undefined);
+    const caller = appRouter.createCaller(createAuthenticatedContext());
+
+    await expect(caller.recommendations.generateForOpenAnomalies({ organizationId: 9 })).rejects.toMatchObject<Partial<TRPCError>>({ code: "FORBIDDEN" });
+    expect(database.generateAnomalyRecommendations).not.toHaveBeenCalled();
   });
 
   it("runs deterministic monitoring only after the caller passes organization role checks", async () => {

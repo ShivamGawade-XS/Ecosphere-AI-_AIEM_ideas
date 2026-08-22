@@ -22,11 +22,12 @@ Persisted reading
   → carbon calculation (where configured)
   → rolling baseline/anomaly detection
   → anomaly-derived alert
+  → idempotent evidence-linked recommendation (only when a new anomaly is created)
   → EcoScore calculation
   → persisted monitoring-run summary
 ```
 
-Every output has an organization identifier, source reading or meter reference, calculation/detection version, timestamp, and audit event. The worker uses two deterministic passes: a read-only chronological history pass for baselines and a write pass limited to readings without the versioned `required-value` quality finding. The monitoring run is idempotent through a unique `runKey`; duplicate triggers return the stored run summary instead of creating duplicate findings or alerts. A previously failed key can be safely retried.
+Every output has an organization identifier, source reading or meter reference, calculation/detection version, timestamp, and audit event. The worker uses two deterministic passes: a read-only chronological history pass for baselines and a write pass limited to readings without the versioned `required-value` quality finding. The monitoring run is idempotent through a unique `runKey`; duplicate triggers return the stored run summary instead of creating duplicate findings or alerts. A previously failed key can be safely retried. The recommendation handoff is likewise versioned and unique per anomaly; it runs only after one or more new anomaly events are persisted and never opens an LLM loop.
 
 ## 3. Data-quality rules
 
@@ -91,6 +92,10 @@ Every snapshot persists the components, calculation version, data-window metadat
 | `monitoring_alerts` | Organization + anomaly | title, message, severity, open/acknowledged/resolved status, timestamps |
 | `eco_score_snapshots` | Organization (+ optional site) | score, component JSON, calculation version, window metadata, computed timestamp |
 | `monitoring_runs` | Organization/all organizations | run key, trigger, status, counts, error summary, start/finish timestamps |
+| `sustainability_forecasts` | Organization + meter | method, evidence count, bounded horizon, forecast points, holdout metrics or explicit insufficiency state, calculation version |
+| `sustainability_recommendations` | Organization + anomaly | deterministic evidence JSON, priority, confidence, impact disclosure, version, lifecycle, optional action link |
+| `intervention_comparisons` | Organization + saved scenarios | selected scenario IDs, immutable ranking result, transparent weighting version |
+| `sustainability_report_snapshots` | Organization | selection criteria, materialized evidence payload, factor disclosure, generation timestamp |
 
 ## 7. tRPC API specification
 
@@ -106,6 +111,11 @@ All procedures are tenant-scoped and require an authenticated membership. Organi
 | `alerts.list` | Any member | `organizationId` | Most recent 25 alert records with anomaly/meter evidence | Review alert lifecycle. |
 | `alerts.acknowledge` | Owner, manager, operator | `organizationId`, `alertId` | Updated alert | Record accountable acknowledgement. |
 | `analytics.ecoScoreHistory` | Any member | `organizationId`, optional `limit` (1–100) | Persisted score snapshots | Render the transparent score timeline. |
+| `forecasts.generate` / `forecasts.list` | Mutable roles / any member | Meter and bounded horizon / organization | Versioned moving-average forecast / forecast history | Produce and review short-horizon evidence, including insufficiency and holdout metrics. |
+| `recommendations.generateForOpenAnomalies` / `recommendations.list` | Mutable roles / any member | Organization | Created/idempotent records / recommendation history | Generate only rule-based recommendations tied to persisted open anomalies. |
+| `recommendations.acceptAsAction` | Owner, manager, operator | Recommendation ID | Action link and idempotency result | Convert an accepted recommendation into accountable work. |
+| `comparisons.create` / `comparisons.list` | Mutable roles / any member | 2–6 tenant-owned scenario IDs / organization | Persisted transparent rank / comparison history | Compare modeled interventions without claiming guaranteed savings. |
+| `reports.createSnapshot` / `reports.snapshots` | Mutable roles / any member | Title / organization | Immutable evidence snapshot / snapshot history | Generate export-ready evidence and factor disclosures from current persisted records. |
 
 ## 8. Scheduled worker callback
 
@@ -137,7 +147,7 @@ After deployment, the owner creates a periodic job with a minimum one-minute cad
 
 ## 10. Guardrails
 
-The monitoring worker must not call an LLM. Numerical data and state transitions are deterministic and traceable. An optional future explanation service can render a persisted anomaly/alert into natural language only after the event exists, and must cite the event’s stored evidence.
+The monitoring worker must not call an LLM. Numerical data and state transitions are deterministic and traceable. The current recommendation engine is an evidence-linked deterministic rule set; its confidence is a rule disclosure, not a forecast-accuracy guarantee. No carbon or savings estimate is invented when an approved factor or modeled intervention output is unavailable. An optional future explanation service can render a persisted anomaly/alert into natural language only after the event exists, and must cite the event’s stored evidence.
 
 ## References
 

@@ -461,6 +461,78 @@ export const appRouter = router({
         if (!result) throw new TRPCError({ code: "NOT_FOUND", message: "Action not found in this organization." });
         return result;
       }),
+    collaboration: protectedProcedure
+      .input(z.object({ organizationId: z.number().int().positive(), actionId: z.number().int().positive() }))
+      .query(async ({ ctx, input }) => {
+        await requireOrganizationRole(ctx.user.id, input.organizationId);
+        const result = await db.getActionCollaboration(input.organizationId, input.actionId);
+        if (!result) throw new TRPCError({ code: "NOT_FOUND", message: "Action not found in this organization." });
+        return result;
+      }),
+    addComment: protectedProcedure
+      .input(z.object({ organizationId: z.number().int().positive(), actionId: z.number().int().positive(), body: z.string().trim().min(2).max(5_000) }))
+      .mutation(async ({ ctx, input }) => {
+        await requireOrganizationRole(ctx.user.id, input.organizationId, mutableRoles);
+        const comment = await db.addActionComment({ ...input, userId: ctx.user.id });
+        if (!comment) throw new TRPCError({ code: "NOT_FOUND", message: "Action not found in this organization." });
+        return comment;
+      }),
+    addEvidence: protectedProcedure
+      .input(z.object({ organizationId: z.number().int().positive(), actionId: z.number().int().positive(), type: z.enum(["note", "url", "attachment"]), label: z.string().trim().min(2).max(240), reference: z.string().trim().min(2).max(1024) }))
+      .mutation(async ({ ctx, input }) => {
+        await requireOrganizationRole(ctx.user.id, input.organizationId, mutableRoles);
+        const evidence = await db.addActionEvidence({ ...input, userId: ctx.user.id });
+        if (!evidence) throw new TRPCError({ code: "NOT_FOUND", message: "Action not found in this organization." });
+        return evidence;
+      }),
+  }),
+
+  forecasts: router({
+    list: protectedProcedure
+      .input(z.object({ organizationId: z.number().int().positive() }))
+      .query(async ({ ctx, input }) => {
+        await requireOrganizationRole(ctx.user.id, input.organizationId);
+        return db.listSustainabilityForecasts(input.organizationId);
+      }),
+    generate: protectedProcedure
+      .input(z.object({ organizationId: z.number().int().positive(), meterId: z.number().int().positive(), horizonPoints: z.number().int().min(1).max(24).default(6) }))
+      .mutation(async ({ ctx, input }) => {
+        await requireOrganizationRole(ctx.user.id, input.organizationId, mutableRoles);
+        const forecast = await db.generateSustainabilityForecast({ ...input, userId: ctx.user.id });
+        if (!forecast) throw new TRPCError({ code: "NOT_FOUND", message: "Active meter not found in this organization." });
+        return forecast;
+      }),
+  }),
+
+  recommendations: router({
+    list: protectedProcedure
+      .input(z.object({ organizationId: z.number().int().positive() }))
+      .query(async ({ ctx, input }) => {
+        await requireOrganizationRole(ctx.user.id, input.organizationId);
+        return db.listSustainabilityRecommendations(input.organizationId);
+      }),
+    generateForOpenAnomalies: protectedProcedure
+      .input(z.object({ organizationId: z.number().int().positive() }))
+      .mutation(async ({ ctx, input }) => {
+        await requireOrganizationRole(ctx.user.id, input.organizationId, mutableRoles);
+        return db.generateAnomalyRecommendations({ organizationId: input.organizationId, userId: ctx.user.id });
+      }),
+    updateStatus: protectedProcedure
+      .input(z.object({ organizationId: z.number().int().positive(), recommendationId: z.number().int().positive(), status: z.enum(["accepted", "dismissed", "archived"]) }))
+      .mutation(async ({ ctx, input }) => {
+        await requireOrganizationRole(ctx.user.id, input.organizationId, mutableRoles);
+        const result = await db.updateSustainabilityRecommendationStatus({ ...input, userId: ctx.user.id });
+        if (!result) throw new TRPCError({ code: "NOT_FOUND", message: "Recommendation not found in this organization." });
+        return result;
+      }),
+    acceptAsAction: protectedProcedure
+      .input(z.object({ organizationId: z.number().int().positive(), recommendationId: z.number().int().positive() }))
+      .mutation(async ({ ctx, input }) => {
+        await requireOrganizationRole(ctx.user.id, input.organizationId, mutableRoles);
+        const result = await db.acceptRecommendationAsAction({ ...input, userId: ctx.user.id });
+        if (!result) throw new TRPCError({ code: "NOT_FOUND", message: "Recommendation not found in this organization." });
+        return result;
+      }),
   }),
 
   intelligence: router({
@@ -478,8 +550,8 @@ export const appRouter = router({
             { id: "registry", label: "Meter registry", state: overview.meterCount > 0 ? "ready" : "blocked", evidence: `${overview.meterCount} registered meter${overview.meterCount === 1 ? "" : "s"}` },
             { id: "readings", label: "Validated readings", state: overview.readingCount > 0 ? "ready" : "waiting", evidence: `${overview.readingCount} persisted reading${overview.readingCount === 1 ? "" : "s"}` },
             { id: "analytics", label: "Deterministic monitoring and anomaly pipeline", state: monitoring.latestRun ? "ready" : "waiting", evidence: monitoring.latestRun ? `Latest run: ${monitoring.latestRun.status}; ${monitoring.openAlertCount} open alert${monitoring.openAlertCount === 1 ? "" : "s"}.` : "Awaiting a manual or scheduled monitoring run." },
-            { id: "forecast", label: "Forecasting", state: "planned", evidence: "Forecasting is not yet implemented; the current EcoScore is not a forecast." },
-            { id: "recommendations", label: "Evidence-linked recommendations", state: "planned", evidence: "Recommendation explanations remain planned; no LLM is invoked by the monitoring worker." },
+            { id: "forecast", label: "Deterministic short-horizon forecasting", state: "ready", evidence: "Meter forecasts use a versioned moving-average method with explicit insufficiency and backtest evidence." },
+            { id: "recommendations", label: "Evidence-linked recommendations", state: "ready", evidence: "Rule-based recommendations preserve anomaly evidence; no LLM is invoked to invent numerical results." },
           ] as const,
         };
       }),
@@ -492,6 +564,18 @@ export const appRouter = router({
         await requireOrganizationRole(ctx.user.id, input.organizationId);
         const [overview, recentBatches] = await Promise.all([db.getOperationsOverview(input.organizationId), db.listIngestionBatches(input.organizationId)]);
         return { overview, recentBatches };
+      }),
+    snapshots: protectedProcedure
+      .input(z.object({ organizationId: z.number().int().positive() }))
+      .query(async ({ ctx, input }) => {
+        await requireOrganizationRole(ctx.user.id, input.organizationId);
+        return db.listSustainabilityReportSnapshots(input.organizationId);
+      }),
+    createSnapshot: protectedProcedure
+      .input(z.object({ organizationId: z.number().int().positive(), title: z.string().trim().min(3).max(180) }))
+      .mutation(async ({ ctx, input }) => {
+        await requireOrganizationRole(ctx.user.id, input.organizationId, mutableRoles);
+        return db.createSustainabilityReportSnapshot({ ...input, userId: ctx.user.id });
       }),
   }),
 
@@ -524,6 +608,23 @@ export const appRouter = router({
       .query(async ({ ctx, input }) => {
         await requireOrganizationRole(ctx.user.id, input.organizationId);
         return db.listSustainabilityScenarios(input.organizationId);
+      }),
+  }),
+
+  comparisons: router({
+    list: protectedProcedure
+      .input(z.object({ organizationId: z.number().int().positive() }))
+      .query(async ({ ctx, input }) => {
+        await requireOrganizationRole(ctx.user.id, input.organizationId);
+        return db.listInterventionComparisons(input.organizationId);
+      }),
+    create: protectedProcedure
+      .input(z.object({ organizationId: z.number().int().positive(), name: z.string().trim().min(3).max(180), scenarioIds: z.array(z.number().int().positive()).min(2).max(6).refine((ids) => new Set(ids).size === ids.length, "Scenario selection must not contain duplicates.") }))
+      .mutation(async ({ ctx, input }) => {
+        await requireOrganizationRole(ctx.user.id, input.organizationId, mutableRoles);
+        const result = await db.createInterventionComparison({ ...input, userId: ctx.user.id });
+        if (!result) throw new TRPCError({ code: "NOT_FOUND", message: "At least two selected scenarios must belong to this organization." });
+        return result;
       }),
   }),
 

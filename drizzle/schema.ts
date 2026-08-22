@@ -34,6 +34,11 @@ export const dataImportFileStatuses = ["uploaded", "previewed", "committed", "co
 export const dataImportRowStatuses = ["valid", "rejected", "imported"] as const;
 export const readingCorrectionStatuses = ["approved", "rejected"] as const;
 export const emissionFactorStatuses = ["draft", "approved", "archived"] as const;
+export const forecastMethods = ["moving_average_v1"] as const;
+export const forecastStatuses = ["ready", "insufficient_data"] as const;
+export const recommendationStatuses = ["proposed", "accepted", "dismissed", "archived"] as const;
+export const actionEvidenceTypes = ["note", "url", "attachment"] as const;
+export const reportSnapshotStatuses = ["generated", "archived"] as const;
 
 export type ScenarioAssumptions = {
   baselineEnergyKwh: number;
@@ -604,6 +609,127 @@ export const alertEscalations = mysqlTable(
   (table) => [uniqueIndex("alert_escalations_alert_unique").on(table.alertId), index("alert_escalations_org_status_due_idx").on(table.organizationId, table.status, table.dueAt), index("alert_escalations_action_idx").on(table.actionId)],
 );
 
+/** Versioned short-horizon forecast derived only from active persisted meter readings. */
+export const sustainabilityForecasts = mysqlTable(
+  "sustainability_forecasts",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    organizationId: int("organizationId").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    siteId: int("siteId").references(() => sites.id, { onDelete: "set null" }),
+    meterId: int("meterId").notNull().references(() => meters.id, { onDelete: "cascade" }),
+    method: mysqlEnum("method", forecastMethods).notNull(),
+    status: mysqlEnum("status", forecastStatuses).notNull(),
+    horizonPoints: int("horizonPoints").notNull(),
+    inputReadingCount: int("inputReadingCount").notNull(),
+    forecast: json("forecast").notNull(),
+    backtest: json("backtest"),
+    calculationVersion: varchar("calculationVersion", { length: 64 }).notNull(),
+    generatedAt: timestamp("generatedAt").defaultNow().notNull(),
+  },
+  (table) => [
+    index("forecasts_org_generated_idx").on(table.organizationId, table.generatedAt),
+    index("forecasts_meter_generated_idx").on(table.meterId, table.generatedAt),
+  ],
+);
+
+/** Recommendation record preserving the deterministic evidence IDs and values that justify it. */
+export const sustainabilityRecommendations = mysqlTable(
+  "sustainability_recommendations",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    organizationId: int("organizationId").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    siteId: int("siteId").references(() => sites.id, { onDelete: "set null" }),
+    anomalyId: int("anomalyId").references(() => anomalyEvents.id, { onDelete: "set null" }),
+    forecastId: int("forecastId").references(() => sustainabilityForecasts.id, { onDelete: "set null" }),
+    actionId: int("actionId").references(() => sustainabilityActions.id, { onDelete: "set null" }),
+    status: mysqlEnum("status", recommendationStatuses).notNull().default("proposed"),
+    priority: mysqlEnum("priority", actionPriorities).notNull(),
+    title: varchar("title", { length: 180 }).notNull(),
+    rationale: text("rationale").notNull(),
+    expectedImpact: json("expectedImpact").notNull(),
+    evidence: json("evidence").notNull(),
+    confidence: decimal("confidence", { precision: 5, scale: 4 }).notNull(),
+    recommendationVersion: varchar("recommendationVersion", { length: 64 }).notNull(),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("recommendations_anomaly_version_unique").on(table.anomalyId, table.recommendationVersion),
+    index("recommendations_org_status_idx").on(table.organizationId, table.status),
+    index("recommendations_anomaly_idx").on(table.anomalyId),
+    index("recommendations_forecast_idx").on(table.forecastId),
+  ],
+);
+
+/** Human collaboration note attached to an accountable sustainability action. */
+export const sustainabilityActionComments = mysqlTable(
+  "sustainability_action_comments",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    organizationId: int("organizationId").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    actionId: int("actionId").notNull().references(() => sustainabilityActions.id, { onDelete: "cascade" }),
+    authorUserId: int("authorUserId").notNull().references(() => users.id),
+    body: text("body").notNull(),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+  },
+  (table) => [
+    index("action_comments_action_created_idx").on(table.actionId, table.createdAt),
+    index("action_comments_org_created_idx").on(table.organizationId, table.createdAt),
+  ],
+);
+
+/** Evidence reference for action completion; file bytes remain in managed object storage, never this table. */
+export const sustainabilityActionEvidence = mysqlTable(
+  "sustainability_action_evidence",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    organizationId: int("organizationId").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    actionId: int("actionId").notNull().references(() => sustainabilityActions.id, { onDelete: "cascade" }),
+    type: mysqlEnum("type", actionEvidenceTypes).notNull(),
+    label: varchar("label", { length: 240 }).notNull(),
+    reference: varchar("reference", { length: 1024 }).notNull(),
+    createdByUserId: int("createdByUserId").notNull().references(() => users.id),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+  },
+  (table) => [
+    index("action_evidence_action_created_idx").on(table.actionId, table.createdAt),
+    index("action_evidence_org_created_idx").on(table.organizationId, table.createdAt),
+  ],
+);
+
+/** Immutable persisted ranking output for a selected deterministic intervention set. */
+export const interventionComparisons = mysqlTable(
+  "intervention_comparisons",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    organizationId: int("organizationId").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    name: varchar("name", { length: 180 }).notNull(),
+    scenarioIds: json("scenarioIds").notNull(),
+    results: json("results").notNull(),
+    rankingVersion: varchar("rankingVersion", { length: 64 }).notNull(),
+    createdByUserId: int("createdByUserId").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+  },
+  (table) => [index("comparisons_org_created_idx").on(table.organizationId, table.createdAt)],
+);
+
+/** Report snapshot preserves its selection criteria, evidence, and factor disclosure at generation time. */
+export const sustainabilityReportSnapshots = mysqlTable(
+  "sustainability_report_snapshots",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    organizationId: int("organizationId").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    title: varchar("title", { length: 180 }).notNull(),
+    status: mysqlEnum("status", reportSnapshotStatuses).notNull().default("generated"),
+    criteria: json("criteria").notNull(),
+    evidence: json("evidence").notNull(),
+    factorDisclosure: text("factorDisclosure").notNull(),
+    generatedByUserId: int("generatedByUserId").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+  },
+  (table) => [index("report_snapshots_org_created_idx").on(table.organizationId, table.createdAt)],
+);
+
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
 export type Organization = typeof organizations.$inferSelect;
@@ -628,3 +754,9 @@ export type DataImportFile = typeof dataImportFiles.$inferSelect;
 export type DataImportRow = typeof dataImportRows.$inferSelect;
 export type ReadingCorrection = typeof readingCorrections.$inferSelect;
 export type EmissionFactor = typeof emissionFactors.$inferSelect;
+export type SustainabilityForecast = typeof sustainabilityForecasts.$inferSelect;
+export type SustainabilityRecommendation = typeof sustainabilityRecommendations.$inferSelect;
+export type SustainabilityActionComment = typeof sustainabilityActionComments.$inferSelect;
+export type SustainabilityActionEvidence = typeof sustainabilityActionEvidence.$inferSelect;
+export type InterventionComparison = typeof interventionComparisons.$inferSelect;
+export type SustainabilityReportSnapshot = typeof sustainabilityReportSnapshots.$inferSelect;

@@ -182,6 +182,9 @@ export async function runMonitoringForOrganization(input: {
       windowStart: readings[0]?.reading.observedAt ?? null,
       windowEnd: readings[readings.length - 1]?.reading.observedAt ?? null,
     });
+    if (anomaliesCreated > 0) {
+      await db.generateAnomalyRecommendations({ organizationId: input.organizationId });
+    }
     await db.evaluateAlertEscalations(input.organizationId);
 
     const summary: MonitoringRunSummary = {

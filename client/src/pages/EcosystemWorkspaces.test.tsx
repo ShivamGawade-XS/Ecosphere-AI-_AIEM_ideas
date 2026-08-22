@@ -4,8 +4,8 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const testApi = vi.hoisted(() => ({
-  organizationsMine: vi.fn(), overview: vi.fn(), recentReadings: vi.fn(), actionList: vi.fn(), siteList: vi.fn(), meterList: vi.fn(),
-  intelligenceReadiness: vi.fn(), monitoringOverview: vi.fn(), monitoringStatus: vi.fn(), monitoringHealth: vi.fn(), alertRouting: vi.fn(), deliveryAttempts: vi.fn(), escalationPolicy: vi.fn(), escalations: vi.fn(), reportsSummary: vi.fn(), scenarioList: vi.fn(), invalidate: vi.fn().mockResolvedValue(undefined),
+  organizationsMine: vi.fn(), overview: vi.fn(), recentReadings: vi.fn(), actionList: vi.fn(), actionCollaboration: vi.fn(), siteList: vi.fn(), meterList: vi.fn(),
+  intelligenceReadiness: vi.fn(), monitoringOverview: vi.fn(), monitoringStatus: vi.fn(), monitoringHealth: vi.fn(), alertRouting: vi.fn(), deliveryAttempts: vi.fn(), escalationPolicy: vi.fn(), escalations: vi.fn(), forecastList: vi.fn(), recommendationList: vi.fn(), comparisonList: vi.fn(), reportsSummary: vi.fn(), reportSnapshots: vi.fn(), scenarioList: vi.fn(), invalidate: vi.fn().mockResolvedValue(undefined),
   actionCreateMode: "success" as "success" | "error", scenarioPreviewMode: "success" as "success" | "error", scenarioSaveMode: "success" as "success" | "error",
   scenarioPreviewData: undefined as unknown,
 }));
@@ -14,7 +14,7 @@ vi.mock("@/lib/trpc", () => ({
   trpc: {
     useUtils: () => ({
       organizations: { mine: { invalidate: testApi.invalidate } }, sites: { list: { invalidate: testApi.invalidate } }, meters: { list: { invalidate: testApi.invalidate } },
-      actions: { list: { invalidate: testApi.invalidate } }, scenarios: { list: { invalidate: testApi.invalidate } }, analytics: { overview: { invalidate: testApi.invalidate } }, monitoring: { status: { invalidate: testApi.invalidate }, health: { invalidate: testApi.invalidate } }, alertRouting: { get: { invalidate: testApi.invalidate }, deliveries: { invalidate: testApi.invalidate } }, alertEscalation: { get: { invalidate: testApi.invalidate }, list: { invalidate: testApi.invalidate } }, intelligence: { readiness: { invalidate: testApi.invalidate } },
+      actions: { list: { invalidate: testApi.invalidate }, collaboration: { invalidate: testApi.invalidate } }, scenarios: { list: { invalidate: testApi.invalidate } }, comparisons: { list: { invalidate: testApi.invalidate } }, forecasts: { list: { invalidate: testApi.invalidate } }, recommendations: { list: { invalidate: testApi.invalidate } }, reports: { snapshots: { invalidate: testApi.invalidate } }, analytics: { overview: { invalidate: testApi.invalidate } }, monitoring: { status: { invalidate: testApi.invalidate }, health: { invalidate: testApi.invalidate } }, alertRouting: { get: { invalidate: testApi.invalidate }, deliveries: { invalidate: testApi.invalidate } }, alertEscalation: { get: { invalidate: testApi.invalidate }, list: { invalidate: testApi.invalidate } }, intelligence: { readiness: { invalidate: testApi.invalidate } },
     }),
     organizations: { mine: { useQuery: () => testApi.organizationsMine() }, create: { useMutation: () => ({ isPending: false, mutate: vi.fn() }) } },
     operations: { overview: { useQuery: () => testApi.overview() } },
@@ -25,11 +25,14 @@ vi.mock("@/lib/trpc", () => ({
     monitoring: { status: { useQuery: () => testApi.monitoringStatus() }, health: { useQuery: () => testApi.monitoringHealth() }, runOnce: { useMutation: () => ({ isPending: false, mutate: vi.fn(), data: undefined, error: null }) }, configureTarget: { useMutation: () => ({ isPending: false, mutate: vi.fn(), error: null }) }, retryRecovery: { useMutation: () => ({ isPending: false, mutate: vi.fn(), error: null }) } },
     alertRouting: { get: { useQuery: () => testApi.alertRouting() }, deliveries: { useQuery: () => testApi.deliveryAttempts() }, update: { useMutation: () => ({ isPending: false, mutate: vi.fn(), error: null }) } },
     alertEscalation: { get: { useQuery: () => testApi.escalationPolicy() }, list: { useQuery: () => testApi.escalations() }, update: { useMutation: () => ({ isPending: false, mutate: vi.fn(), error: null }) }, evaluateNow: { useMutation: () => ({ isPending: false, mutate: vi.fn(), error: null }) } },
+    forecasts: { list: { useQuery: () => testApi.forecastList() }, generate: { useMutation: () => ({ isPending: false, mutate: vi.fn(), data: undefined, error: null }) } },
+    recommendations: { list: { useQuery: () => testApi.recommendationList() }, generateForOpenAnomalies: { useMutation: () => ({ isPending: false, mutate: vi.fn(), error: null }) }, updateStatus: { useMutation: () => ({ isPending: false, mutate: vi.fn(), error: null }) } },
     analytics: { overview: { useQuery: () => testApi.monitoringOverview() } },
     alerts: { acknowledge: { useMutation: () => ({ isPending: false, mutate: vi.fn() }) } },
-    actions: { list: { useQuery: () => testApi.actionList() }, create: { useMutation: (options?: { onSuccess?: () => void; onError?: () => void }) => ({ isPending: false, mutate: () => testApi.actionCreateMode === "error" ? options?.onError?.() : options?.onSuccess?.() }) }, updateStatus: { useMutation: () => ({ isPending: false, mutate: vi.fn() }) } },
-    reports: { summary: { useQuery: () => testApi.reportsSummary() } },
+    actions: { list: { useQuery: () => testApi.actionList() }, collaboration: { useQuery: () => testApi.actionCollaboration() }, create: { useMutation: (options?: { onSuccess?: () => void; onError?: () => void }) => ({ isPending: false, mutate: () => testApi.actionCreateMode === "error" ? options?.onError?.() : options?.onSuccess?.() }) }, updateStatus: { useMutation: () => ({ isPending: false, mutate: vi.fn() }) }, addComment: { useMutation: () => ({ isPending: false, mutate: vi.fn() }) }, addEvidence: { useMutation: () => ({ isPending: false, mutate: vi.fn() }) } },
+    reports: { summary: { useQuery: () => testApi.reportsSummary() }, snapshots: { useQuery: () => testApi.reportSnapshots() }, createSnapshot: { useMutation: () => ({ isPending: false, mutate: vi.fn(), error: null }) } },
     scenarios: { list: { useQuery: () => testApi.scenarioList() }, preview: { useMutation: (options?: { onError?: () => void }) => ({ isPending: false, mutate: () => testApi.scenarioPreviewMode === "error" && options?.onError?.(), data: testApi.scenarioPreviewData }) }, save: { useMutation: (options?: { onSuccess?: () => void; onError?: () => void }) => ({ isPending: false, mutate: () => testApi.scenarioSaveMode === "error" ? options?.onError?.() : options?.onSuccess?.() }) } },
+    comparisons: { list: { useQuery: () => testApi.comparisonList() }, create: { useMutation: () => ({ isPending: false, mutate: vi.fn(), error: null }) } },
   },
 }));
 
@@ -49,6 +52,7 @@ describe("authenticated ecosystem workspaces", () => {
     testApi.overview.mockReturnValue(query({ siteCount: 1, meterCount: 2, readingCount: 3, actionCount: 1, activeActionCount: 1, latestReadingAt: new Date() }));
     testApi.recentReadings.mockReturnValue(query([]));
     testApi.actionList.mockReturnValue(query([]));
+    testApi.actionCollaboration.mockReturnValue(query({ action: { id: 1, title: "Inspect HVAC" }, comments: [], evidence: [] }));
     testApi.siteList.mockReturnValue(query([]));
     testApi.meterList.mockReturnValue(query([]));
     testApi.intelligenceReadiness.mockReturnValue(query({ overview: { meterCount: 2, readingCount: 3 }, pipeline: [{ id: "registry", label: "Meter registry", state: "ready", evidence: "2 registered meters" }, { id: "analytics", label: "Anomaly and forecast worker", state: "planned", evidence: "Requires durable scheduling." }] }));
@@ -59,7 +63,11 @@ describe("authenticated ecosystem workspaces", () => {
     testApi.deliveryAttempts.mockReturnValue(query([]));
     testApi.escalationPolicy.mockReturnValue(query(null));
     testApi.escalations.mockReturnValue(query([]));
+    testApi.forecastList.mockReturnValue(query([]));
+    testApi.recommendationList.mockReturnValue(query([]));
+    testApi.comparisonList.mockReturnValue(query([]));
     testApi.reportsSummary.mockReturnValue(query({ overview: { siteCount: 1, meterCount: 2, readingCount: 3, actionCount: 1, activeActionCount: 1 }, recentBatches: [] }));
+    testApi.reportSnapshots.mockReturnValue(query([]));
     testApi.scenarioList.mockReturnValue(query([]));
     testApi.actionCreateMode = "success"; testApi.scenarioPreviewMode = "success"; testApi.scenarioSaveMode = "success"; testApi.scenarioPreviewData = undefined;
   });

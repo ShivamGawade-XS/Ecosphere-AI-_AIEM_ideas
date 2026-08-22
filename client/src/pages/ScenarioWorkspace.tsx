@@ -1,5 +1,5 @@
 import React, { FormEvent, useState } from "react";
-import { Calculator, CloudSun, Database, Loader2, Save, ShieldCheck } from "lucide-react";
+import { Calculator, CloudSun, Database, GitCompareArrows, Loader2, Save, ShieldCheck } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { useActiveOrganization } from "@/hooks/useActiveOrganization";
 
@@ -17,19 +17,22 @@ export default function ScenarioWorkspace() {
   const organizationId = tenant.organizationId ?? 0;
   const sites = trpc.sites.list.useQuery({ organizationId }, { enabled: Boolean(organizationId) });
   const scenarios = trpc.scenarios.list.useQuery({ organizationId }, { enabled: Boolean(organizationId) });
+  const comparisons = trpc.comparisons.list.useQuery({ organizationId }, { enabled: Boolean(organizationId) });
   const [assumptions, setAssumptions] = useState<Assumptions>(initial);
   const [scenarioName, setScenarioName] = useState("HVAC reduction option");
   const [siteId, setSiteId] = useState<number | undefined>();
   const [notice, setNotice] = useState<string | null>(null);
+  const [selectedScenarioIds, setSelectedScenarioIds] = useState<number[]>([]);
   const preview = trpc.scenarios.preview.useMutation({ onError: () => setNotice("Scenario could not be calculated. Review the values and retry.") });
   const save = trpc.scenarios.save.useMutation({
     onSuccess: async () => { await utils.scenarios.list.invalidate({ organizationId }); setNotice("Scenario saved with its server calculation and assumptions."); },
     onError: () => setNotice("Scenario was not saved. Retry the protected operation."),
   });
+  const createComparison = trpc.comparisons.create.useMutation({ onSuccess: async () => { await utils.comparisons.list.invalidate({ organizationId }); setNotice("Comparison snapshot saved with its scenario IDs and transparent rank formula."); }, onError: () => setNotice("Comparison was not saved. Select two tenant-owned scenarios and retry.") });
   const setNumber = (key: keyof Assumptions, value: string) => setAssumptions((current) => ({ ...current, [key]: Number(value) }));
 
-  if (tenant.isLoading || (Boolean(organizationId) && (sites.isLoading || scenarios.isLoading))) return <div className="app-loading-state"><Loader2 className="animate-spin"/> Loading saved calculations…</div>;
-  if (tenant.error || sites.error || scenarios.error) return <section className="workspace-error"><span className="ops-eyebrow"><span /> SCENARIO UNAVAILABLE</span><h1>Scenario records could not be loaded.</h1><p>No baseline or saved output is inferred when the protected data query fails.</p><button onClick={() => { sites.refetch(); scenarios.refetch(); }}>Retry workspace</button></section>;
+  if (tenant.isLoading || (Boolean(organizationId) && (sites.isLoading || scenarios.isLoading || comparisons.isLoading))) return <div className="app-loading-state"><Loader2 className="animate-spin"/> Loading saved calculations…</div>;
+  if (tenant.error || sites.error || scenarios.error || comparisons.error) return <section className="workspace-error"><span className="ops-eyebrow"><span /> SCENARIO UNAVAILABLE</span><h1>Scenario records could not be loaded.</h1><p>No baseline or saved output is inferred when the protected data query fails.</p><button onClick={() => { void sites.refetch(); void scenarios.refetch(); void comparisons.refetch(); }}>Retry workspace</button></section>;
   if (!tenant.activeOrganization) return <section className="empty-workspace"><span className="ops-eyebrow"><span /> SCENARIOS NEED A TENANT</span><h1>Save decisions against a real boundary.</h1><p>Create an organization before calculating and preserving intervention options.</p></section>;
   const result = preview.data?.results;
   const fields: Array<[keyof Assumptions, string, string, number, number]> = [
@@ -52,6 +55,6 @@ export default function ScenarioWorkspace() {
         {result ? <><div className="carbon-shift"><span>{Math.round(result.baselineCarbonKg).toLocaleString()} kgCO₂e</span><i /> <strong>{Math.round(result.projectedCarbonKg).toLocaleString()} kgCO₂e</strong></div><p><b>{Math.round(result.carbonReductionKg).toLocaleString()} kgCO₂e</b> modeled reduction using saved input values.</p><div className="scenario-result-grid"><div><span>ENERGY</span><b>{Math.round(result.projectedEnergyKwh).toLocaleString()} kWh</b></div><div><span>WATER</span><b>{Math.round(result.projectedWaterM3).toLocaleString()} m³</b></div><div><span>WASTE</span><b>{Math.round(result.projectedWasteKg).toLocaleString()} kg</b></div><div><span>ANNUAL SAVINGS</span><b>{formatInr(result.annualSavingsInr)}</b></div><div><span>PAYBACK</span><b>{result.paybackYears ? `${result.paybackYears.toFixed(1)} yrs` : "—"}</b></div><div><span>3-YEAR ROI</span><b>{result.roiPct === null ? "—" : `${Math.round(result.roiPct)}%`}</b></div></div><button type="button" className="save-scenario" onClick={() => save.mutate({ organizationId, siteId, name: scenarioName, assumptions })} disabled={save.isPending}>{save.isPending ? <Loader2 className="animate-spin"/> : <Save size={16}/>} {save.isPending ? "Saving calculation" : "Save scenario"}</button></> : <div className="scenario-empty"><Calculator size={31}/><p>Submit a transparent input set to calculate a server-owned result. This model uses documented pilot defaults and does not represent a procurement quote or realized savings.</p></div>}
       </section>
     </section>
-    <section className="workspace-panel scenario-history"><header><div><span className="ops-eyebrow">SAVED SCENARIOS</span><h2>Decision history</h2></div><ShieldCheck size={22}/></header>{scenarios.data?.length ? <div className="compact-list">{scenarios.data.map((scenario) => <div key={scenario.id}><span>{scenario.name}</span><b>{Math.round(scenario.results.carbonReductionKg).toLocaleString()} kgCO₂e</b><small>{scenario.calculationVersion} · {new Date(scenario.updatedAt).toLocaleString()}</small></div>)}</div> : <p>No saved scenario exists for this tenant yet.</p>}</section>
+    <section className="workspace-panel scenario-history"><header><div><span className="ops-eyebrow">SAVED SCENARIOS</span><h2>Decision history</h2></div><ShieldCheck size={22}/></header>{scenarios.data?.length ? <div className="compact-list">{scenarios.data.map((scenario) => <div key={scenario.id}><label><input type="checkbox" aria-label={`Select ${scenario.name} for comparison`} checked={selectedScenarioIds.includes(scenario.id)} onChange={(event) => setSelectedScenarioIds((current) => event.target.checked ? [...current, scenario.id].slice(-6) : current.filter((id) => id !== scenario.id))} /> Select</label><span>{scenario.name}</span><b>{Math.round(scenario.results.carbonReductionKg).toLocaleString()} kgCO₂e</b><small>{scenario.calculationVersion} · {new Date(scenario.updatedAt).toLocaleString()}</small></div>)}</div> : <p>No saved scenario exists for this tenant yet.</p>}<div className="workspace-actions"><button disabled={selectedScenarioIds.length < 2 || createComparison.isPending} onClick={() => createComparison.mutate({ organizationId, name: `Comparison ${new Date().toLocaleDateString()}`, scenarioIds: selectedScenarioIds })}>{createComparison.isPending ? "Ranking scenarios…" : <><GitCompareArrows size={16}/> Compare selected scenarios</>}</button><small>{selectedScenarioIds.length}/6 selected. The rank weights modeled carbon reduction, annual savings, ROI, and annual-savings-to-investment efficiency.</small></div>{comparisons.data?.[0] ? <div className="compact-list"><div><span>Latest comparison · {comparisons.data[0].rankingVersion}</span>{((comparisons.data[0].results as Array<{ rank: number; name: string; score: number }>)).slice(0, 3).map((item) => <small key={`${item.rank}-${item.name}`}>#{item.rank} {item.name} · score {item.score}</small>)}</div></div> : <p>No comparison snapshot exists yet. Save at least two scenarios to rank them.</p>}</section>
   </div>;
 }

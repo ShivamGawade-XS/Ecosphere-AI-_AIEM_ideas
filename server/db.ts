@@ -26,6 +26,12 @@ import {
   sites,
   sustainabilityReadings,
   sustainabilityActions,
+  sustainabilityActionComments,
+  sustainabilityActionEvidence,
+  sustainabilityForecasts,
+  sustainabilityRecommendations,
+  interventionComparisons,
+  sustainabilityReportSnapshots,
   sustainabilityScenarios,
   type ScenarioAssumptions,
   type ScenarioResults,
@@ -35,6 +41,9 @@ import {
 import { ENV } from "./_core/env";
 import { evaluateScheduledMonitoringHealth } from "./domain/monitoringOperations";
 import { planRecoveryFailure, planRecoveryRetry, shouldResolveRecovery } from "./domain/recoveryLifecycle";
+import { buildMovingAverageForecast, FORECAST_CALCULATION_VERSION } from "./domain/forecasting";
+import { buildAnomalyRecommendation, RECOMMENDATION_VERSION } from "./domain/recommendations";
+import { INTERVENTION_COMPARISON_VERSION, rankScenarioInterventions } from "./domain/interventionComparison";
 
 let databaseInstance: ReturnType<typeof drizzle> | null = null;
 
@@ -1257,4 +1266,222 @@ export async function listSustainabilityScenarios(organizationId: number) {
     .where(eq(sustainabilityScenarios.organizationId, organizationId))
     .orderBy(desc(sustainabilityScenarios.updatedAt))
     .limit(30);
+}
+
+export async function generateSustainabilityForecast(input: { organizationId: number; meterId: number; horizonPoints: number; userId: number }) {
+  const database = await requireDb();
+  const meter = await getMeterById(input.organizationId, input.meterId);
+  if (!meter) return undefined;
+  const readings = await database.select({ observedAt: sustainabilityReadings.observedAt, value: sustainabilityReadings.value })
+    .from(sustainabilityReadings)
+    .where(and(eq(sustainabilityReadings.organizationId, input.organizationId), eq(sustainabilityReadings.meterId, input.meterId), isNull(sustainabilityReadings.supersededAt)))
+    .orderBy(desc(sustainabilityReadings.observedAt)).limit(50);
+  const forecast = buildMovingAverageForecast({ readings: readings.map((row) => ({ observedAt: row.observedAt, value: Number(row.value) })), horizonPoints: input.horizonPoints });
+  const [created] = await database.insert(sustainabilityForecasts).values({
+    organizationId: input.organizationId,
+    siteId: meter.siteId,
+    meterId: meter.id,
+    method: forecast.method,
+    status: forecast.status,
+    horizonPoints: forecast.horizonPoints,
+    inputReadingCount: forecast.inputReadingCount,
+    forecast,
+    backtest: forecast.backtest,
+    calculationVersion: forecast.calculationVersion,
+  }).$returningId();
+  await database.insert(auditEvents).values({
+    organizationId: input.organizationId,
+    actorUserId: input.userId,
+    eventType: "forecast.generated",
+    resourceType: "sustainability_forecast",
+    resourceId: String(created.id),
+    payload: { meterId: input.meterId, status: forecast.status, inputReadingCount: forecast.inputReadingCount, calculationVersion: FORECAST_CALCULATION_VERSION },
+  });
+  return { id: created.id, meter, forecast };
+}
+
+export async function listSustainabilityForecasts(organizationId: number) {
+  const database = await requireDb();
+  return database.select({ forecast: sustainabilityForecasts, meter: meters })
+    .from(sustainabilityForecasts)
+    .innerJoin(meters, eq(sustainabilityForecasts.meterId, meters.id))
+    .where(eq(sustainabilityForecasts.organizationId, organizationId))
+    .orderBy(desc(sustainabilityForecasts.generatedAt)).limit(50);
+}
+
+export async function generateAnomalyRecommendations(input: { organizationId: number; userId?: number }) {
+  const database = await requireDb();
+  const anomalies = await database.select({ anomaly: anomalyEvents, meter: meters })
+    .from(anomalyEvents)
+    .innerJoin(meters, eq(anomalyEvents.meterId, meters.id))
+    .where(and(eq(anomalyEvents.organizationId, input.organizationId), eq(anomalyEvents.status, "open")))
+    .orderBy(desc(anomalyEvents.detectedAt)).limit(50);
+  let created = 0;
+  const recommendationIds: number[] = [];
+  for (const item of anomalies) {
+    const recommendation = buildAnomalyRecommendation({
+      anomalyId: item.anomaly.id,
+      resourceType: item.meter.resourceType,
+      meterName: item.meter.displayName,
+      severity: item.anomaly.severity,
+      baselineMean: Number(item.anomaly.baselineMean),
+      observedValue: Number(item.anomaly.observedValue),
+      zScore: Number(item.anomaly.zScore),
+      detectedAt: item.anomaly.detectedAt,
+    });
+    const existing = await database.select({ id: sustainabilityRecommendations.id }).from(sustainabilityRecommendations)
+      .where(and(eq(sustainabilityRecommendations.anomalyId, item.anomaly.id), eq(sustainabilityRecommendations.recommendationVersion, RECOMMENDATION_VERSION))).limit(1);
+    if (existing[0]) {
+      recommendationIds.push(existing[0].id);
+      continue;
+    }
+    const [row] = await database.insert(sustainabilityRecommendations).values({
+      organizationId: input.organizationId,
+      siteId: item.anomaly.siteId,
+      anomalyId: item.anomaly.id,
+      priority: recommendation.priority,
+      title: recommendation.title,
+      rationale: recommendation.rationale,
+      expectedImpact: recommendation.expectedImpact,
+      evidence: recommendation.evidence,
+      confidence: recommendation.confidence.toFixed(4),
+      recommendationVersion: RECOMMENDATION_VERSION,
+    }).$returningId();
+    created += 1;
+    recommendationIds.push(row.id);
+    await database.insert(auditEvents).values({
+      organizationId: input.organizationId,
+      actorUserId: input.userId ?? null,
+      eventType: "recommendation.generated",
+      resourceType: "sustainability_recommendation",
+      resourceId: String(row.id),
+      payload: { anomalyId: item.anomaly.id, recommendationVersion: RECOMMENDATION_VERSION, priority: recommendation.priority },
+    });
+  }
+  return { created, recommendationIds };
+}
+
+export async function listSustainabilityRecommendations(organizationId: number) {
+  const database = await requireDb();
+  return database.select({ recommendation: sustainabilityRecommendations, anomaly: anomalyEvents, meter: meters, action: sustainabilityActions })
+    .from(sustainabilityRecommendations)
+    .leftJoin(anomalyEvents, eq(sustainabilityRecommendations.anomalyId, anomalyEvents.id))
+    .leftJoin(meters, eq(anomalyEvents.meterId, meters.id))
+    .leftJoin(sustainabilityActions, eq(sustainabilityRecommendations.actionId, sustainabilityActions.id))
+    .where(eq(sustainabilityRecommendations.organizationId, organizationId))
+    .orderBy(desc(sustainabilityRecommendations.updatedAt)).limit(50);
+}
+
+export async function updateSustainabilityRecommendationStatus(input: { organizationId: number; recommendationId: number; status: "accepted" | "dismissed" | "archived"; userId: number }) {
+  const database = await requireDb();
+  const recommendation = await database.select().from(sustainabilityRecommendations).where(and(
+    eq(sustainabilityRecommendations.organizationId, input.organizationId),
+    eq(sustainabilityRecommendations.id, input.recommendationId),
+  )).limit(1);
+  if (!recommendation[0]) return undefined;
+  await database.update(sustainabilityRecommendations).set({ status: input.status }).where(eq(sustainabilityRecommendations.id, input.recommendationId));
+  await database.insert(auditEvents).values({ organizationId: input.organizationId, actorUserId: input.userId, eventType: "recommendation.status_changed", resourceType: "sustainability_recommendation", resourceId: String(input.recommendationId), payload: { status: input.status } });
+  return { id: input.recommendationId, status: input.status };
+}
+
+export async function acceptRecommendationAsAction(input: { organizationId: number; recommendationId: number; userId: number }) {
+  const database = await requireDb();
+  const recommendation = await database.select().from(sustainabilityRecommendations).where(and(
+    eq(sustainabilityRecommendations.organizationId, input.organizationId),
+    eq(sustainabilityRecommendations.id, input.recommendationId),
+  )).limit(1);
+  if (!recommendation[0]) return undefined;
+  if (recommendation[0].actionId) return { actionId: recommendation[0].actionId, idempotent: true };
+  return database.transaction(async (tx) => {
+    const [action] = await tx.insert(sustainabilityActions).values({
+      organizationId: input.organizationId,
+      siteId: recommendation[0].siteId,
+      title: recommendation[0].title,
+      description: recommendation[0].rationale,
+      source: "recommendation",
+      status: "proposed",
+      priority: recommendation[0].priority,
+      ownerUserId: input.userId,
+    }).$returningId();
+    await tx.update(sustainabilityRecommendations).set({ status: "accepted", actionId: action.id }).where(eq(sustainabilityRecommendations.id, input.recommendationId));
+    await tx.insert(auditEvents).values({ organizationId: input.organizationId, actorUserId: input.userId, eventType: "recommendation.accepted_as_action", resourceType: "sustainability_recommendation", resourceId: String(input.recommendationId), payload: { actionId: action.id } });
+    return { actionId: action.id, idempotent: false };
+  });
+}
+
+async function getSustainabilityAction(organizationId: number, actionId: number) {
+  const database = await requireDb();
+  const actions = await database.select().from(sustainabilityActions).where(and(eq(sustainabilityActions.organizationId, organizationId), eq(sustainabilityActions.id, actionId))).limit(1);
+  return actions[0];
+}
+
+export async function getActionCollaboration(organizationId: number, actionId: number) {
+  const database = await requireDb();
+  const action = await getSustainabilityAction(organizationId, actionId);
+  if (!action) return undefined;
+  const [comments, evidence] = await Promise.all([
+    database.select({ comment: sustainabilityActionComments, author: users }).from(sustainabilityActionComments).innerJoin(users, eq(sustainabilityActionComments.authorUserId, users.id)).where(and(eq(sustainabilityActionComments.organizationId, organizationId), eq(sustainabilityActionComments.actionId, actionId))).orderBy(desc(sustainabilityActionComments.createdAt)).limit(100),
+    database.select().from(sustainabilityActionEvidence).where(and(eq(sustainabilityActionEvidence.organizationId, organizationId), eq(sustainabilityActionEvidence.actionId, actionId))).orderBy(desc(sustainabilityActionEvidence.createdAt)).limit(100),
+  ]);
+  return { action, comments, evidence };
+}
+
+export async function addActionComment(input: { organizationId: number; actionId: number; body: string; userId: number }) {
+  const database = await requireDb();
+  const action = await getSustainabilityAction(input.organizationId, input.actionId);
+  if (!action) return undefined;
+  const [comment] = await database.insert(sustainabilityActionComments).values({ organizationId: input.organizationId, actionId: input.actionId, authorUserId: input.userId, body: input.body }).$returningId();
+  await database.insert(auditEvents).values({ organizationId: input.organizationId, actorUserId: input.userId, eventType: "action.comment_added", resourceType: "sustainability_action", resourceId: String(input.actionId), payload: { commentId: comment.id } });
+  return comment;
+}
+
+export async function addActionEvidence(input: { organizationId: number; actionId: number; type: "note" | "url" | "attachment"; label: string; reference: string; userId: number }) {
+  const database = await requireDb();
+  const action = await getSustainabilityAction(input.organizationId, input.actionId);
+  if (!action) return undefined;
+  const [evidence] = await database.insert(sustainabilityActionEvidence).values({ organizationId: input.organizationId, actionId: input.actionId, type: input.type, label: input.label, reference: input.reference, createdByUserId: input.userId }).$returningId();
+  await database.insert(auditEvents).values({ organizationId: input.organizationId, actorUserId: input.userId, eventType: "action.evidence_added", resourceType: "sustainability_action", resourceId: String(input.actionId), payload: { evidenceId: evidence.id, type: input.type } });
+  return evidence;
+}
+
+export async function createInterventionComparison(input: { organizationId: number; scenarioIds: number[]; name: string; userId: number }) {
+  const database = await requireDb();
+  const scenarios = await database.select().from(sustainabilityScenarios).where(eq(sustainabilityScenarios.organizationId, input.organizationId)).orderBy(desc(sustainabilityScenarios.updatedAt)).limit(100);
+  const requested = new Set(input.scenarioIds);
+  const selected = scenarios.filter((scenario) => requested.has(scenario.id));
+  if (selected.length !== requested.size || selected.length < 2) return undefined;
+  const results = rankScenarioInterventions(selected.map((scenario) => ({ id: scenario.id, name: scenario.name, assumptions: { investmentInr: scenario.assumptions.investmentInr }, results: scenario.results })));
+  const [comparison] = await database.insert(interventionComparisons).values({ organizationId: input.organizationId, name: input.name, scenarioIds: input.scenarioIds, results, rankingVersion: INTERVENTION_COMPARISON_VERSION, createdByUserId: input.userId }).$returningId();
+  await database.insert(auditEvents).values({ organizationId: input.organizationId, actorUserId: input.userId, eventType: "comparison.created", resourceType: "intervention_comparison", resourceId: String(comparison.id), payload: { scenarioIds: input.scenarioIds, rankingVersion: INTERVENTION_COMPARISON_VERSION } });
+  return { id: comparison.id, results, rankingVersion: INTERVENTION_COMPARISON_VERSION };
+}
+
+export async function listInterventionComparisons(organizationId: number) {
+  const database = await requireDb();
+  return database.select().from(interventionComparisons).where(eq(interventionComparisons.organizationId, organizationId)).orderBy(desc(interventionComparisons.createdAt)).limit(30);
+}
+
+export async function createSustainabilityReportSnapshot(input: { organizationId: number; title: string; userId: number }) {
+  const database = await requireDb();
+  const [overview, monitoring, forecasts, recommendations, comparisons, approvedFactors] = await Promise.all([
+    getOperationsOverview(input.organizationId),
+    getMonitoringStatus(input.organizationId),
+    listSustainabilityForecasts(input.organizationId),
+    listSustainabilityRecommendations(input.organizationId),
+    listInterventionComparisons(input.organizationId),
+    listApprovedEmissionFactors(input.organizationId),
+  ]);
+  const factorDisclosure = approvedFactors.length
+    ? `This evidence snapshot uses tenant-governed factor records only where calculations selected them. Approved factor references: ${approvedFactors.map((factor) => `${factor.factorVersion} (${factor.sourceName})`).join("; ")}.`
+    : "No approved tenant emission factors are currently available. Existing pilot carbon outputs may use the clearly labelled 0.82 kgCO2e/kWh fallback and are not certified or regional reporting figures.";
+  const evidence = { overview, monitoring, forecasts: forecasts.slice(0, 10), recommendations: recommendations.slice(0, 20), comparisons: comparisons.slice(0, 10) };
+  const criteria = { organizationId: input.organizationId, scope: "current tenant-bound persisted records", generatedAt: new Date().toISOString(), version: "evidence-snapshot-v1" };
+  const [snapshot] = await database.insert(sustainabilityReportSnapshots).values({ organizationId: input.organizationId, title: input.title, criteria, evidence, factorDisclosure, generatedByUserId: input.userId }).$returningId();
+  await database.insert(auditEvents).values({ organizationId: input.organizationId, actorUserId: input.userId, eventType: "report.snapshot_generated", resourceType: "sustainability_report_snapshot", resourceId: String(snapshot.id), payload: { evidenceVersion: criteria.version } });
+  return { id: snapshot.id, criteria, evidence, factorDisclosure };
+}
+
+export async function listSustainabilityReportSnapshots(organizationId: number) {
+  const database = await requireDb();
+  return database.select().from(sustainabilityReportSnapshots).where(eq(sustainabilityReportSnapshots.organizationId, organizationId)).orderBy(desc(sustainabilityReportSnapshots.createdAt)).limit(30);
 }

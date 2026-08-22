@@ -113,6 +113,16 @@
 - [ ] Add health, observability, backup/recovery, CI-quality, accessibility, performance, and release-operation foundations.
 - [ ] Validate full production-release journeys and document remaining external deployment or integration dependencies honestly.
 
+### R3 — Decision Support and Reporting
+
+- [x] Add deterministic short-horizon forecasting with versioned methods, backtesting metrics, and explicit insufficiency states.
+- [ ] Extend evidence-linked recommendation generation to consume persisted quality findings, forecasts, governed factors, and modeled intervention evidence without inventing numerical impacts.
+- [ ] Add storage-backed action attachments, enforce completion-evidence capture before status completion, and retain escalation-to-action lineage.
+- [ ] Add attributable Scenario-to-action links across scenario, comparison, recommendation, action persistence, APIs, and workspace views.
+- [x] Add report snapshots with criteria, generated evidence, factor/version disclosures, and export-ready data contracts.
+- [x] Add functional Forecast, Recommendations, Action Collaboration, and Evidence Reports UI states and role-protected APIs.
+- [ ] Add focused deterministic domain, API, and workspace tests for report scopes and tenant isolation across action collaboration, comparisons, and report snapshot endpoints.
+
 ### R1 — Trusted Data Plane
 
 - [x] Add versioned factor, import-file, import-row, and reading-correction persistence records with tenant-scoped indexes.
