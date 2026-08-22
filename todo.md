@@ -97,3 +97,8 @@
 - [x] Align monitoring eligibility with the documented future-timestamp baseline exclusion and explicit unprocessed-reading selection.
 - [x] Reconcile the documented analytics API contract with the implemented router, including EcoScore history and carbon totals.
 - [x] Add an explicitly labeled simulated-pilot reading source for controlled anomaly verification without misrepresenting campus data.
+
+## Complete Feature Catalogue
+
+- [x] Review the current verified platform state and gap inventory for a complete feature catalogue.
+- [x] Deliver a detailed, prioritized feature catalogue covering product modules, technical foundations, operations, security, and rollout.
