@@ -23,3 +23,8 @@
 - [x] Add integration tests for scheduled source refresh and alert lifecycle transitions against a controlled test database seam.
 - [x] Extract and test the deterministic advisor fallback response for concise, simulated, non-inventive behavior.
 - [x] Isolate database-backed sustainability integration tests with a dedicated temporary campus fixture and explicit cleanup.
+- [x] Add a downloadable PDF report for the current EcoScore, sustainability KPIs, active anomalies, and report provenance.
+- [x] Test the PDF export workflow and update the dashboard quality checks.
+- [x] Mock jsPDF download behavior to verify the report generator saves the expected PDF filename and content path.
+- [ ] Guide user authentication for ShivamGawade-XS/Ecosphere-AI-_AIEM_ideas and await explicit approval before any GitHub push, issue, PR, or merge action.
+- [ ] Prepare an updated checkpoint and guide the user to publish the site, then activate scheduled monitoring on the live deployment.
