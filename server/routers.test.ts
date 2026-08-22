@@ -9,6 +9,7 @@ const database = vi.hoisted(() => ({
   listOrganizationsForUser: vi.fn(),
   listSites: vi.fn(),
   createSustainabilityAction: vi.fn(),
+  updateSustainabilityActionStatus: vi.fn(),
   getOperationsOverview: vi.fn(),
   createSustainabilityScenario: vi.fn(),
   getMonitoringStatus: vi.fn(),
@@ -79,6 +80,7 @@ describe("EcoSphere core API", () => {
     database.listOrganizationsForUser.mockResolvedValue([{ organization: { id: 8, name: "AIEM Campus" }, membership: { role: "owner" } }]);
     database.listSites.mockResolvedValue([{ id: 13, organizationId: 8, name: "AIEM Main Campus" }]);
     database.createSustainabilityAction.mockResolvedValue({ id: 71 });
+    database.updateSustainabilityActionStatus.mockResolvedValue({ id: 71, status: "completed" });
     database.getOperationsOverview.mockResolvedValue({ siteCount: 1, meterCount: 1, readingCount: 0, actionCount: 0, activeActionCount: 0, latestReadingAt: null });
     database.createSustainabilityScenario.mockResolvedValue({ id: 84 });
     database.getMonitoringStatus.mockResolvedValue({ latestRun: null, latestScore: null, openAlertCount: 0 });
@@ -264,6 +266,18 @@ describe("EcoSphere core API", () => {
 
     expect(result.scenario).toEqual({ id: 84 });
     expect(database.createSustainabilityScenario).toHaveBeenCalledWith(expect.objectContaining({ organizationId: 8, name: "HVAC option", userId: 17, calculationVersion: "pilot-v1", results: expect.objectContaining({ carbonReductionKg: 8.2 }) }));
+  });
+
+  it("requires persisted action evidence before completion and keeps the action tenant-scoped", async () => {
+    const caller = appRouter.createCaller(createAuthenticatedContext());
+    database.getActionCollaboration.mockResolvedValueOnce({ action: { id: 71 }, comments: [], evidence: [] });
+
+    await expect(caller.actions.updateStatus({ organizationId: 8, actionId: 71, status: "completed" })).rejects.toMatchObject<Partial<TRPCError>>({ code: "BAD_REQUEST" });
+    expect(database.updateSustainabilityActionStatus).not.toHaveBeenCalled();
+
+    database.getActionCollaboration.mockResolvedValueOnce({ action: { id: 71 }, comments: [], evidence: [{ id: 14, type: "attachment", reference: "/manus-storage/evidence.pdf" }] });
+    await expect(caller.actions.updateStatus({ organizationId: 8, actionId: 71, status: "completed" })).resolves.toMatchObject({ id: 71, status: "completed" });
+    expect(database.updateSustainabilityActionStatus).toHaveBeenCalledWith({ organizationId: 8, actionId: 71, status: "completed", userId: 17 });
   });
 
   it("returns tenant-scoped CSV source-file evidence and requires governance roles for factor approval", async () => {

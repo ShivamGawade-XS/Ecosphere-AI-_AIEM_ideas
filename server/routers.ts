@@ -439,6 +439,7 @@ export const appRouter = router({
       .input(z.object({
         organizationId: z.number().int().positive(),
         siteId: z.number().int().positive().optional(),
+        scenarioId: z.number().int().positive().optional(),
         title: z.string().trim().min(3).max(180),
         description: z.string().trim().max(5_000).optional(),
         priority: z.enum(actionPriorities).default("medium"),
@@ -451,12 +452,20 @@ export const appRouter = router({
           const site = (await db.listSites(input.organizationId)).find((item) => item.id === input.siteId);
           if (!site) throw new TRPCError({ code: "NOT_FOUND", message: "Site not found in this organization." });
         }
+        if (input.scenarioId && !(await db.listSustainabilityScenarios(input.organizationId)).some((scenario) => scenario.id === input.scenarioId)) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Saved scenario not found in this organization." });
+        }
         return db.createSustainabilityAction({ ...input, userId: ctx.user.id });
       }),
     updateStatus: protectedProcedure
       .input(z.object({ organizationId: z.number().int().positive(), actionId: z.number().int().positive(), status: z.enum(actionStatuses) }))
       .mutation(async ({ ctx, input }) => {
         await requireOrganizationRole(ctx.user.id, input.organizationId, mutableRoles);
+        if (input.status === "completed") {
+          const collaboration = await db.getActionCollaboration(input.organizationId, input.actionId);
+          if (!collaboration) throw new TRPCError({ code: "NOT_FOUND", message: "Action not found in this organization." });
+          if (!collaboration.evidence.length) throw new TRPCError({ code: "BAD_REQUEST", message: "Add completion evidence before marking this action complete." });
+        }
         const result = await db.updateSustainabilityActionStatus({ ...input, userId: ctx.user.id });
         if (!result) throw new TRPCError({ code: "NOT_FOUND", message: "Action not found in this organization." });
         return result;
@@ -484,6 +493,25 @@ export const appRouter = router({
         const evidence = await db.addActionEvidence({ ...input, userId: ctx.user.id });
         if (!evidence) throw new TRPCError({ code: "NOT_FOUND", message: "Action not found in this organization." });
         return evidence;
+      }),
+    uploadAttachment: protectedProcedure
+      .input(z.object({
+        organizationId: z.number().int().positive(),
+        actionId: z.number().int().positive(),
+        label: z.string().trim().min(2).max(240),
+        fileName: z.string().trim().min(1).max(160),
+        contentType: z.string().trim().min(3).max(120),
+        contentBase64: z.string().min(4).max(2_800_000),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        await requireOrganizationRole(ctx.user.id, input.organizationId, mutableRoles);
+        const bytes = Buffer.from(input.contentBase64, "base64");
+        if (!bytes.length || bytes.length > 2_000_000) throw new TRPCError({ code: "BAD_REQUEST", message: "Attachment must contain 1–2,000,000 bytes." });
+        const safeFileName = input.fileName.replace(/[^a-zA-Z0-9._-]/g, "_");
+        const stored = await storagePut(`organizations/${input.organizationId}/actions/${input.actionId}/${safeFileName}`, bytes, input.contentType);
+        const evidence = await db.addActionEvidence({ organizationId: input.organizationId, actionId: input.actionId, type: "attachment", label: input.label, reference: stored.url, userId: ctx.user.id });
+        if (!evidence) throw new TRPCError({ code: "NOT_FOUND", message: "Action not found in this organization." });
+        return { ...evidence, url: stored.url };
       }),
   }),
 

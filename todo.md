@@ -117,7 +117,7 @@
 
 - [x] Add deterministic short-horizon forecasting with versioned methods, backtesting metrics, and explicit insufficiency states.
 - [ ] Extend evidence-linked recommendation generation to consume persisted quality findings, forecasts, governed factors, and modeled intervention evidence without inventing numerical impacts.
-- [ ] Add storage-backed action attachments, enforce completion-evidence capture before status completion, and retain escalation-to-action lineage.
+- [x] Add storage-backed action attachments, enforce completion-evidence capture before status completion, and retain escalation-to-action lineage.
 - [ ] Add attributable Scenario-to-action links across scenario, comparison, recommendation, action persistence, APIs, and workspace views.
 - [x] Add report snapshots with criteria, generated evidence, factor/version disclosures, and export-ready data contracts.
 - [x] Add functional Forecast, Recommendations, Action Collaboration, and Evidence Reports UI states and role-protected APIs.

@@ -1131,6 +1131,7 @@ export async function getMonitoringOverview(organizationId: number) {
 export async function createSustainabilityAction(input: {
   organizationId: number;
   siteId?: number;
+  scenarioId?: number;
   title: string;
   description?: string;
   priority: (typeof import("../drizzle/schema").actionPriorities)[number];
@@ -1145,6 +1146,7 @@ export async function createSustainabilityAction(input: {
       .values({
         organizationId: input.organizationId,
         siteId: input.siteId ?? null,
+        scenarioId: input.scenarioId ?? null,
         title: input.title,
         description: input.description ?? null,
         priority: input.priority,
@@ -1159,7 +1161,7 @@ export async function createSustainabilityAction(input: {
       eventType: "action.created",
       resourceType: "sustainability_action",
       resourceId: String(created.id),
-      payload: { priority: input.priority, siteId: input.siteId ?? null },
+      payload: { priority: input.priority, siteId: input.siteId ?? null, scenarioId: input.scenarioId ?? null },
     });
     return created;
   });

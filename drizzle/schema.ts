@@ -327,6 +327,7 @@ export const sustainabilityActions = mysqlTable(
     title: varchar("title", { length: 180 }).notNull(),
     description: text("description"),
     source: varchar("source", { length: 48 }).notNull().default("manual"),
+    scenarioId: int("scenarioId").references(() => sustainabilityScenarios.id, { onDelete: "set null" }),
     status: mysqlEnum("status", actionStatuses).notNull().default("proposed"),
     priority: mysqlEnum("priority", actionPriorities).notNull().default("medium"),
     ownerUserId: int("ownerUserId").references(() => users.id, { onDelete: "set null" }),
@@ -339,6 +340,7 @@ export const sustainabilityActions = mysqlTable(
   (table) => [
     index("sustainability_actions_org_status_idx").on(table.organizationId, table.status),
     index("sustainability_actions_site_idx").on(table.siteId),
+    index("sustainability_actions_scenario_idx").on(table.scenarioId),
   ],
 );
 
