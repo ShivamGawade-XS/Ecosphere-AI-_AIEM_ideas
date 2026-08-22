@@ -30,6 +30,7 @@ Run the quality checks before proposing changes.
 
 ```bash
 pnpm check
+pnpm lint
 pnpm test
 pnpm build
 ```

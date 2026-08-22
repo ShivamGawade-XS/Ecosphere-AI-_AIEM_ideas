@@ -1,13 +1,14 @@
 import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import { parse as parseCookie } from "cookie";
 import { getDb } from "./db";
-import { campuses, dataSources, monitoringSettings, sustainabilityAlerts, telemetry } from "../drizzle/schema";
+import { campuses, dataSources, monitoringSettings, sustainabilityAlerts, sustainabilityRecommendations, sustainabilityScenarios, telemetry } from "../drizzle/schema";
 import { calculateEcoScore, calculateForecast, calculateSimulation, DEMO_ELECTRICITY_EMISSION_FACTOR, detectEnergyAnomaly, getSdgImpact, round, type MetricName, type SimulationInput, type TimeSeriesPoint } from "../shared/sustainability";
 import { notifyOwner } from "./_core/notification";
 import { createHeartbeatJob, updateHeartbeatJob } from "./_core/heartbeat";
 import { COOKIE_NAME } from "../shared/const";
 
 export const AIEM_CAMPUS_SLUG = "aiem-campus";
+export type RecommendationStatus = "active" | "dismissed" | "implemented";
 
 const DEMO_SERIES = {
   energy: [682, 710, 695, 724, 701, 738, 720, 745, 730, 752, 740, 765],
@@ -26,7 +27,10 @@ export async function ensureDemoCampus() {
   if (!db) return null;
 
   const existing = (await db.select().from(campuses).where(eq(campuses.slug, AIEM_CAMPUS_SLUG)).limit(1))[0];
-  if (existing) return existing;
+  if (existing) {
+    await ensureCampusSupportRecords(existing.id);
+    return existing;
+  }
 
   await db.insert(campuses).values({ slug: AIEM_CAMPUS_SLUG, name: "AIEM Campus", location: "Goa, India", mode: "demo" });
   const campus = (await db.select().from(campuses).where(eq(campuses.slug, AIEM_CAMPUS_SLUG)).limit(1))[0];
@@ -60,7 +64,14 @@ export async function ensureDemoCampus() {
     { campusId: campus.id, name: "Building Meter Gateway", sourceType: "sensor", status: "ready", approved: false, fieldMapping: JSON.stringify({ note: "Approval required before any production sensor data is ingested." }) },
   ]);
   await db.insert(monitoringSettings).values({ campusId: campus.id, highSeverityNotifications: true, scheduleMinutes: 15 });
+  await ensureCampusSupportRecords(campus.id);
   return campus;
+}
+
+async function getCampusById(campusId: number) {
+  const db = await getDb();
+  if (!db) return null;
+  return (await db.select().from(campuses).where(eq(campuses.id, campusId)).limit(1))[0] ?? null;
 }
 
 export async function getCampusTelemetry(campusId: number) {
@@ -73,8 +84,34 @@ function asPoint(row: { capturedAt: Date; value: string; unit: string; isSimulat
   return { timestamp: row.capturedAt.getTime(), value: Number(row.value), unit: row.unit, simulated: row.isSimulated };
 }
 
-export async function getCampusDashboard() {
-  const campus = await ensureDemoCampus();
+async function ensureCampusSupportRecords(campusId: number) {
+  const db = await getDb();
+  if (!db) return;
+  const sources = await db.select().from(dataSources).where(eq(dataSources.campusId, campusId));
+  if (!sources.some(source => source.name === "AIEM Demonstration Meter Stream")) {
+    await db.insert(dataSources).values({ campusId, name: "AIEM Demonstration Meter Stream", sourceType: "sensor", status: "connected", approved: true, fieldMapping: JSON.stringify({ adapter: "demo-sensor", refreshMode: "scheduled", simulated: true }) });
+  }
+  await syncRecommendations(campusId, false);
+}
+
+export async function syncRecommendations(campusId: number, hasHighAlert: boolean) {
+  const db = await getDb();
+  if (!db) return [];
+  const templates = getRecommendations(hasHighAlert);
+  const existing = await db.select().from(sustainabilityRecommendations).where(eq(sustainabilityRecommendations.campusId, campusId));
+  for (const recommendation of templates) {
+    const matching = existing.find(item => item.title === recommendation.title);
+    if (matching) {
+      await db.update(sustainabilityRecommendations).set({ impact: recommendation.impact.toLowerCase() as "low" | "medium" | "high", detail: recommendation.detail, action: recommendation.action }).where(eq(sustainabilityRecommendations.id, matching.id));
+    } else {
+      await db.insert(sustainabilityRecommendations).values({ campusId, title: recommendation.title, impact: recommendation.impact.toLowerCase() as "low" | "medium" | "high", detail: recommendation.detail, action: recommendation.action, status: "active", isSimulated: true });
+    }
+  }
+  return db.select().from(sustainabilityRecommendations).where(eq(sustainabilityRecommendations.campusId, campusId)).orderBy(desc(sustainabilityRecommendations.updatedAt));
+}
+
+export async function getCampusDashboard(campusId?: number) {
+  const campus = campusId ? await getCampusById(campusId) : await ensureDemoCampus();
   if (!campus) return getFallbackDashboard();
   const db = await getDb();
   if (!db) return getFallbackDashboard();
@@ -93,6 +130,8 @@ export async function getCampusDashboard() {
   const sources = await db.select().from(dataSources).where(eq(dataSources.campusId, campus.id));
   const settings = (await db.select().from(monitoringSettings).where(eq(monitoringSettings.campusId, campus.id)).limit(1))[0];
   const defaultSimulation = calculateSimulation(baseline, { energyReductionPct: 15, waterReductionPct: 8, wasteDiversionPct: 12 });
+  const hasHighAlert = alerts.some(alert => alert.status === "open" && ["high", "critical"].includes(alert.severity));
+  const recommendations = await syncRecommendations(campus.id, hasHighAlert);
 
   return {
     campus: { id: campus.id, name: campus.name, location: campus.location, mode: campus.mode, simulated: true },
@@ -112,12 +151,12 @@ export async function getCampusDashboard() {
     monitoring: { notificationsEnabled: settings?.highSeverityNotifications ?? true, scheduleMinutes: settings?.scheduleMinutes ?? 15, active: Boolean(settings?.scheduleCronTaskUid) },
     defaultSimulation,
     sdgImpact: getSdgImpact(defaultSimulation),
-    recommendations: getRecommendations(alerts.some(alert => alert.status === "open" && ["high", "critical"].includes(alert.severity))),
+    recommendations: recommendations.map(item => ({ ...item, simulated: item.isSimulated })),
   };
 }
 
-export async function injectEnergySpike() {
-  const campus = await ensureDemoCampus();
+export async function injectEnergySpike(campusId?: number) {
+  const campus = campusId ? await getCampusById(campusId) : await ensureDemoCampus();
   const db = await getDb();
   if (!campus || !db) throw new Error("Database unavailable; demo spike cannot be recorded.");
   const energyPoints = (await getCampusTelemetry(campus.id)).filter(row => row.metric === "energy").slice(-8).map(asPoint);
@@ -152,24 +191,46 @@ export async function injectEnergySpike() {
     notificationDelivered = await notifyOwner({ title: "EcoSphere AI: simulated high-severity HVAC alert", content: `${alert.title}. ${alert.recommendedAction}` });
     if (notificationDelivered) await db.update(sustainabilityAlerts).set({ lastNotifiedAt: new Date() }).where(eq(sustainabilityAlerts.id, alert.id));
   }
+  await syncRecommendations(campus.id, true);
   return { created: true, spikeValue, anomaly, alertId: alert?.id, notificationDelivered };
 }
 
 export async function setAlertStatus(alertId: number, status: "acknowledged" | "resolved") {
   const db = await getDb();
   if (!db) throw new Error("Database unavailable");
-  await db.update(sustainabilityAlerts).set({ status, resolvedAt: status === "resolved" ? new Date() : null }).where(eq(sustainabilityAlerts.id, alertId));
+  const alert = (await db.select().from(sustainabilityAlerts).where(eq(sustainabilityAlerts.id, alertId)).limit(1))[0];
+  if (!alert) throw new Error("Alert not found");
+  await db.update(sustainabilityAlerts).set(getAlertStatusPatch(status)).where(eq(sustainabilityAlerts.id, alertId));
+  const unresolved = await db.select().from(sustainabilityAlerts).where(and(eq(sustainabilityAlerts.campusId, alert.campusId), inArray(sustainabilityAlerts.status, ["open", "acknowledged"]), inArray(sustainabilityAlerts.severity, ["high", "critical"])));
+  await syncRecommendations(alert.campusId, unresolved.length > 0);
   return { success: true };
+}
+
+export async function setRecommendationStatus(recommendationId: number, status: RecommendationStatus) {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  const recommendation = (await db.select().from(sustainabilityRecommendations).where(eq(sustainabilityRecommendations.id, recommendationId)).limit(1))[0];
+  if (!recommendation) throw new Error("Recommendation not found");
+  await db.update(sustainabilityRecommendations).set({ status }).where(eq(sustainabilityRecommendations.id, recommendationId));
+  return { success: true };
+}
+
+export function getAlertStatusPatch(status: "acknowledged" | "resolved", now = new Date()) {
+  return { status, resolvedAt: status === "resolved" ? now : null };
 }
 
 export async function createSimulation(input: SimulationInput) {
   const dashboard = await getCampusDashboard();
   const baseline = { energyKwh: dashboard.metrics.energy.value, waterKl: dashboard.metrics.water.value, wasteKg: dashboard.metrics.waste.value };
-  return calculateSimulation(baseline, input);
+  const result = calculateSimulation(baseline, input);
+  const campus = await ensureDemoCampus();
+  const db = await getDb();
+  if (campus && db) await db.insert(sustainabilityScenarios).values({ campusId: campus.id, name: `Conservation scenario ${new Date().toISOString()}`, energyReductionPct: String(input.energyReductionPct), waterReductionPct: String(input.waterReductionPct), wasteDiversionPct: String(input.wasteDiversionPct), projectedCo2Kg: String(result.co2AvoidedKg), projectedSavingsInr: String(result.monthlySavingsInr), isSimulated: true });
+  return result;
 }
 
-export async function updateMonitoringPreferences(input: { enabled: boolean; scheduleMinutes: number }) {
-  const campus = await ensureDemoCampus();
+export async function updateMonitoringPreferences(input: { enabled: boolean; scheduleMinutes: number }, campusId?: number) {
+  const campus = campusId ? await getCampusById(campusId) : await ensureDemoCampus();
   const db = await getDb();
   if (!campus || !db) throw new Error("Database unavailable");
   await db.update(monitoringSettings).set({ highSeverityNotifications: input.enabled, scheduleMinutes: input.scheduleMinutes }).where(eq(monitoringSettings.campusId, campus.id));
@@ -197,43 +258,50 @@ export async function activateScheduledMonitoring(input: { scheduleMinutes: 5 | 
 
 const validMetrics = new Set<MetricName>(["energy", "water", "waste", "carbon"]);
 
+export type ParsedTelemetryRow = { metric: MetricName; value: number; unit: string; capturedAt: Date };
+
+export function parseCsvTelemetryRows(csvData: string): ParsedTelemetryRow[] {
+  const lines = csvData.trim().split(/\r?\n/).filter(Boolean);
+  if (lines.length < 2) throw new Error("CSV must include a header and at least one telemetry row.");
+  const headers = lines[0].split(",").map(header => header.trim().toLowerCase());
+  const required = ["timestamp", "metric", "value", "unit"];
+  if (required.some(field => !headers.includes(field))) throw new Error("CSV header must include timestamp, metric, value, and unit.");
+  const index = Object.fromEntries(headers.map((header, position) => [header, position]));
+  return lines.slice(1, 241).map((line, position) => {
+    const values = line.split(",").map(value => value.trim());
+    const metric = values[index.metric] as MetricName;
+    const value = Number(values[index.value]);
+    const capturedAt = new Date(values[index.timestamp]);
+    if (!validMetrics.has(metric) || !Number.isFinite(value) || value < 0 || Number.isNaN(capturedAt.getTime())) throw new Error(`Invalid CSV telemetry on row ${position + 2}.`);
+    return { metric, value, unit: values[index.unit] || metricUnit(metric), capturedAt };
+  });
+}
+
 export async function importApprovedCsvTelemetry(input: { sourceId: number; csvData: string }) {
   const campus = await ensureDemoCampus();
   const db = await getDb();
   if (!campus || !db) throw new Error("Database unavailable");
   const source = (await db.select().from(dataSources).where(and(eq(dataSources.id, input.sourceId), eq(dataSources.campusId, campus.id))).limit(1))[0];
   if (!source || !source.approved || source.sourceType !== "csv") throw new Error("Select an approved CSV data source before importing telemetry.");
-  const lines = input.csvData.trim().split(/\r?\n/).filter(Boolean);
-  if (lines.length < 2) throw new Error("CSV must include a header and at least one telemetry row.");
-  const headers = lines[0].split(",").map(header => header.trim().toLowerCase());
-  const required = ["timestamp", "metric", "value", "unit"];
-  if (required.some(field => !headers.includes(field))) throw new Error("CSV header must include timestamp, metric, value, and unit.");
-  const index = Object.fromEntries(headers.map((header, position) => [header, position]));
-  const rows = lines.slice(1, 241).map((line, position) => {
-    const values = line.split(",").map(value => value.trim());
-    const metric = values[index.metric] as MetricName;
-    const value = Number(values[index.value]);
-    const capturedAt = new Date(values[index.timestamp]);
-    if (!validMetrics.has(metric) || !Number.isFinite(value) || value < 0 || Number.isNaN(capturedAt.getTime())) throw new Error(`Invalid CSV telemetry on row ${position + 2}.`);
-    return { campusId: campus.id, metric, value: String(value), unit: values[index.unit] || metricUnit(metric), source: source.name, isSimulated: false, capturedAt, metadata: JSON.stringify({ imported: true, sourceId: source.id }) };
-  });
+  const rows = parseCsvTelemetryRows(input.csvData).map(row => ({ campusId: campus.id, metric: row.metric, value: String(row.value), unit: row.unit, source: source.name, isSimulated: false, capturedAt: row.capturedAt, metadata: JSON.stringify({ imported: true, sourceId: source.id }) }));
   await db.insert(telemetry).values(rows);
   await db.update(dataSources).set({ status: "connected", lastSyncAt: new Date() }).where(eq(dataSources.id, source.id));
   return { success: true, imported: rows.length, source: source.name };
 }
 
-export async function runScheduledMonitoring(taskUid?: string) {
+export async function runScheduledMonitoring(taskUid?: string, campusId?: number) {
   const db = await getDb();
   if (!db) throw new Error("Database unavailable");
-  const campus = await ensureDemoCampus();
+  const campus = campusId ? await getCampusById(campusId) : await ensureDemoCampus();
   if (!campus) throw new Error("Demo campus unavailable");
   const settings = (await db.select().from(monitoringSettings).where(taskUid ? eq(monitoringSettings.scheduleCronTaskUid, taskUid) : eq(monitoringSettings.campusId, campus.id)).limit(1))[0];
   if (!settings) return { ok: true, skipped: "orphan" as const };
+  const sourceRefresh = await refreshApprovedDataSources(campus.id);
   const unresolved = await db.select().from(sustainabilityAlerts).where(and(eq(sustainabilityAlerts.campusId, campus.id), inArray(sustainabilityAlerts.status, ["open", "acknowledged"]), inArray(sustainabilityAlerts.severity, ["high", "critical"])));
   let notifications = 0;
   const now = new Date();
   for (const alert of unresolved) {
-    const shouldNotify = !alert.lastNotifiedAt || now.getTime() - alert.lastNotifiedAt.getTime() >= 15 * 60 * 1000;
+    const shouldNotify = shouldSendHighSeverityFollowUp(alert.lastNotifiedAt, now);
     if (settings.highSeverityNotifications && shouldNotify) {
       const delivered = await notifyOwner({ title: `EcoSphere AI follow-up: ${alert.title}`, content: `This simulated ${alert.severity}-severity incident remains ${alert.status}. Next action: ${alert.recommendedAction}` });
       if (delivered) {
@@ -243,7 +311,43 @@ export async function runScheduledMonitoring(taskUid?: string) {
     }
   }
   await db.update(monitoringSettings).set({ lastScheduleCheckAt: now }).where(eq(monitoringSettings.id, settings.id));
-  return { ok: true, unresolved: unresolved.length, notifications };
+  return { ok: true, unresolved: unresolved.length, notifications, sourceRefresh };
+}
+
+export function shouldSendHighSeverityFollowUp(lastNotifiedAt: Date | null, now = new Date()) {
+  return !lastNotifiedAt || now.getTime() - lastNotifiedAt.getTime() >= 15 * 60 * 1000;
+}
+
+export function buildSimulatedSourceRefreshRows(campusId: number, sourceName: string, index: number, capturedAt = new Date()) {
+  const energy = DEMO_SERIES.energy[index % DEMO_SERIES.energy.length] ?? DEMO_SERIES.energy[0];
+  const water = DEMO_SERIES.water[index % DEMO_SERIES.water.length] ?? DEMO_SERIES.water[0];
+  const waste = DEMO_SERIES.waste[index % DEMO_SERIES.waste.length] ?? DEMO_SERIES.waste[0];
+  const metadata = JSON.stringify({ scheduledRefresh: true, simulated: true });
+  return [
+    { campusId, metric: "energy" as const, value: String(energy), unit: "kWh", source: sourceName, isSimulated: true, capturedAt, metadata },
+    { campusId, metric: "water" as const, value: String(water), unit: "kL", source: sourceName, isSimulated: true, capturedAt, metadata },
+    { campusId, metric: "waste" as const, value: String(waste), unit: "kg", source: sourceName, isSimulated: true, capturedAt, metadata },
+    { campusId, metric: "carbon" as const, value: String(round(energy * DEMO_ELECTRICITY_EMISSION_FACTOR)), unit: "kgCO₂e", source: sourceName, isSimulated: true, capturedAt, metadata: JSON.stringify({ scheduledRefresh: true, simulated: true, derived: "energy" }) },
+  ];
+}
+
+export async function refreshApprovedDataSources(campusId: number) {
+  const db = await getDb();
+  if (!db) return { refreshed: 0, checked: 0, skipped: 0 };
+  const sources = await db.select().from(dataSources).where(and(eq(dataSources.campusId, campusId), eq(dataSources.approved, true), eq(dataSources.status, "connected")));
+  let refreshed = 0;
+  let skipped = 0;
+  for (const source of sources) {
+    let config: { adapter?: string };
+    try { config = source.fieldMapping ? JSON.parse(source.fieldMapping) : {}; } catch { config = {}; }
+    if (config.adapter !== "demo-sensor") { skipped += 1; continue; }
+    const sourcePoints = (await getCampusTelemetry(campusId)).filter(point => point.source === source.name);
+    const capturedAt = new Date();
+    await db.insert(telemetry).values(buildSimulatedSourceRefreshRows(campusId, source.name, sourcePoints.length, capturedAt));
+    await db.update(dataSources).set({ lastSyncAt: capturedAt }).where(eq(dataSources.id, source.id));
+    refreshed += 1;
+  }
+  return { refreshed, checked: sources.length, skipped };
 }
 
 export function getRecommendations(hasHighAlert: boolean) {

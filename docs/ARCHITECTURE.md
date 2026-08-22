@@ -25,7 +25,7 @@ flowchart LR
 | --- | --- | --- |
 | Interface | Responsive campus mission control, demo controls, trend chart, simulator, alerts, advisor, and source readiness. | `client/src/pages/Home.tsx` |
 | API boundary | Typed client–server procedures that expose dashboard state and controlled actions. | `server/routers.ts`, `server/routers/sustainability.ts` |
-| Sustainability engine | Seed creation, EcoScore, anomaly detection, forecasting, simulations, alerts, CSV import, and scheduled follow-up logic. | `server/sustainability.ts`, `shared/sustainability.ts` |
+| Sustainability engine | Seed creation, EcoScore, anomaly detection, forecasting, simulations, persisted recommendations, alerts, CSV import, and scheduled refresh/follow-up logic. | `server/sustainability.ts`, `shared/sustainability.ts` |
 | Persistence | Campus, telemetry, alert, data-source, monitoring-setting, and scenario records. | `drizzle/schema.ts` |
 | Scheduler callback | Authenticates platform cron calls and runs idempotent unresolved-alert checks. | `server/scheduledMonitoring.ts`, `server/_core/index.ts` |
 | Advisor | Supplies the language model with a narrow, current state envelope and has a deterministic fallback. | `server/routers/sustainability.ts` |
@@ -39,6 +39,7 @@ flowchart LR
 | `sustainabilityAlerts` | Records detectable operational incidents. | `severity`, `status`, `observedValue`, `threshold`, `recommendedAction` |
 | `monitoringSettings` | Stores notification preferences and scheduled-job identity. | `highSeverityNotifications`, `scheduleMinutes`, `scheduleCronTaskUid` |
 | `dataSources` | Creates a controlled boundary for CSV, sensor, and API integrations. | `sourceType`, `status`, `approved`, `fieldMapping` |
+| `sustainabilityRecommendations` | Persists recommended operational actions and their lifecycle. | `impact`, `detail`, `action`, `status`, `isSimulated` |
 | `sustainabilityScenarios` | Provides a persistence target for future saved interventions. | conservation inputs and projected outputs |
 
 ## Deterministic calculation contract
@@ -54,8 +55,9 @@ The what-if simulator uses declared prototype demo constants: 0.71 kgCO₂e/kWh 
 1. The engine persists a controlled anomaly and checks the deterministic threshold.
 2. A high-severity alert opens only if a matching unresolved alert does not already exist.
 3. If owner notifications are enabled, the backend attempts a project-owner notification and records a successful delivery time.
-4. The scheduled callback rechecks unresolved high- or critical-severity incidents. It is idempotent and avoids repeated notifications within 15 minutes.
-5. Operators can acknowledge or resolve the incident. Resolution sets `resolvedAt` and stops follow-up notification.
+4. The scheduled callback refreshes each approved, connected source with a supported adapter before rechecking unresolved high- or critical-severity incidents. The included `demo-sensor` adapter creates clearly simulated refresh data; real adapters must be explicitly approved and implemented.
+5. The callback is idempotent and avoids repeated high-severity notifications within 15 minutes.
+6. Operators can acknowledge or resolve the incident. Resolution sets `resolvedAt`, refreshes persistent recommendations, and stops follow-up notification.
 
 ## Scheduled monitoring activation
 

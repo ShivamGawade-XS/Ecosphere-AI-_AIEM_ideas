@@ -1,17 +1,25 @@
 # Project TODO
 
-- [ ] Define the EcoSphere AI domain model for campuses, telemetry, alerts, scenarios, recommendations, SDG indicators, and data-source readiness.
-- [ ] Create deterministic seeded AIEM Campus demonstration data, including simulated operating conditions and an HVAC energy-spike incident.
-- [ ] Implement persistent telemetry, alert, simulation, recommendation, and ingestion-source database structures with a schema migration.
-- [ ] Implement deterministic EcoScore, carbon, anomaly-detection, forecasting, intervention-comparison, and SDG-impact calculations.
-- [ ] Build a backend live-demo monitoring flow with controlled energy-spike injection, alert escalation, resolution tracking, and data refresh APIs.
-- [ ] Implement a concise AI sustainability advisor that explains deterministic results and handles follow-up questions without inventing numerical values.
-- [ ] Configure high-severity simulated-incident owner notifications and unresolved-alert checks with configurable delivery behavior.
-- [ ] Prepare a deployment-ready scheduled monitoring check for approved data refresh and unresolved high-severity alert follow-up at a configurable 5–15 minute interval.
-- [ ] Build a polished, responsive EcoSphere AI mission-control dashboard with executive KPIs, trends, analytics, forecasts, alerts, SDG impact, advisor, and simulation controls.
-- [ ] Add future-ready approved data-ingestion configuration and a CSV-import workflow with explicit simulated-data labeling.
-- [ ] Add unit tests for sustainability calculations, monitoring flows, alert behavior, simulations, and advisor guardrails.
-- [ ] Complete visual, responsive, type, lint, and end-to-end demo-flow verification; resolve identified defects.
-- [ ] Write README, setup, architecture, contribution guidance, issue templates, and pull-request templates.
-- [ ] Prepare meaningful locally authored commits and GitHub-ready issue and pull-request materials for user-approved publication.
-- [ ] Restrict all future publication materials and repository operations to ShivamGawade-XS/Ecosphere-AI-_AIEM_ideas only.
+- [x] Define the EcoSphere AI domain model for campuses, telemetry, alerts, scenarios, recommendations, SDG indicators, and data-source readiness.
+- [x] Create deterministic seeded AIEM Campus demonstration data, including simulated operating conditions and an HVAC energy-spike incident.
+- [x] Implement persistent telemetry, alert, simulation, recommendation, and ingestion-source database structures with a schema migration.
+- [x] Implement deterministic EcoScore, carbon, anomaly-detection, forecasting, intervention-comparison, and SDG-impact calculations.
+- [x] Build a backend live-demo monitoring flow with controlled energy-spike injection, alert escalation, resolution tracking, and data refresh APIs.
+- [x] Implement a concise AI sustainability advisor that explains deterministic results and handles follow-up questions without inventing numerical values.
+- [x] Configure high-severity simulated-incident owner notifications and unresolved-alert checks with configurable delivery behavior.
+- [x] Prepare a deployment-ready scheduled monitoring check for approved data refresh and unresolved high-severity alert follow-up at a configurable 5–15 minute interval.
+- [x] Build a polished, responsive EcoSphere AI mission-control dashboard with executive KPIs, trends, analytics, forecasts, alerts, SDG impact, advisor, and simulation controls.
+- [x] Add future-ready approved data-ingestion configuration and a CSV-import workflow with explicit simulated-data labeling.
+- [x] Add unit tests for sustainability calculations, monitoring flows, alert behavior, simulations, and advisor guardrails.
+- [x] Complete visual, responsive, type, lint, and end-to-end demo-flow verification; resolve identified defects.
+- [x] Write README, setup, architecture, contribution guidance, issue templates, and pull-request templates.
+- [x] Prepare meaningful locally authored commits and GitHub-ready issue and pull-request materials for user-approved publication.
+- [x] Restrict all future publication materials and repository operations to ShivamGawade-XS/Ecosphere-AI-_AIEM_ideas only.
+- [x] Persist generated sustainability recommendations and expose their lifecycle through the dashboard.
+- [x] Extend the scheduled monitoring check to refresh approved connected data sources before evaluating unresolved alerts.
+- [x] Add focused tests for alert lifecycle, scheduled monitoring, CSV validation, and advisor fallbacks.
+- [x] Add and run a lint script as part of the required verification workflow.
+- [x] Prepare concrete issue drafts, pull-request descriptions, and a merge sequence for the target repository.
+- [x] Add integration tests for scheduled source refresh and alert lifecycle transitions against a controlled test database seam.
+- [x] Extract and test the deterministic advisor fallback response for concise, simulated, non-inventive behavior.
+- [x] Isolate database-backed sustainability integration tests with a dedicated temporary campus fixture and explicit cleanup.

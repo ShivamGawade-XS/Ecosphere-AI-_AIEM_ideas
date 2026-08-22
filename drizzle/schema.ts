@@ -64,6 +64,19 @@ export const dataSources = mysqlTable("dataSources", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 }, table => [index("sources_campus_idx").on(table.campusId)]);
 
+export const sustainabilityRecommendations = mysqlTable("sustainabilityRecommendations", {
+  id: int("id").autoincrement().primaryKey(),
+  campusId: int("campusId").notNull(),
+  title: varchar("title", { length: 180 }).notNull(),
+  impact: mysqlEnum("impact", ["low", "medium", "high"]).notNull(),
+  detail: text("detail").notNull(),
+  action: varchar("action", { length: 140 }).notNull(),
+  status: mysqlEnum("status", ["active", "dismissed", "implemented"]).default("active").notNull(),
+  isSimulated: boolean("isSimulated").default(true).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, table => [index("recommendations_campus_status_idx").on(table.campusId, table.status)]);
+
 export const monitoringSettings = mysqlTable("monitoringSettings", {
   id: int("id").autoincrement().primaryKey(),
   campusId: int("campusId").notNull(),
