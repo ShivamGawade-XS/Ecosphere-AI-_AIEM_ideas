@@ -15,6 +15,8 @@ export default function ImplementationDashboard() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const statusQuery = trpc.implementation.status.useQuery();
   const organizationsQuery = trpc.organizations.mine.useQuery();
+  const organizationId = organizationsQuery.data?.[0]?.organization.id ?? 0;
+  const auditQuery = trpc.audit.list.useQuery({ organizationId, limit: 8 }, { enabled: Boolean(organizationId) });
   const status = statusQuery.data;
   const filtered = useMemo(
     () => status?.items.filter((item) => filter === "all" || item.status === filter) ?? [],
@@ -59,6 +61,11 @@ export default function ImplementationDashboard() {
         <div><Database size={18} /><span>ORGANIZATIONS</span><strong>{status.summary.organizationCount}</strong><small>authenticated tenants</small></div>
         <div><ShieldCheck size={18} /><span>TRUST BOUNDARY</span><strong>SERVER</strong><small>protected procedures</small></div>
         <div><CheckCircle2 size={18} /><span>API FOUNDATION</span><strong>READY</strong><small>registry + ingestion</small></div>
+      </section>
+
+      <section className="workspace-panel" aria-label="Operational audit evidence">
+        <header><div><span className="ops-eyebrow">GOVERNED AUDIT EVIDENCE</span><h2>Recent tenant operations</h2></div><ShieldCheck size={22} /></header>
+        {!organizationId ? <p>Create or join an organization to view its operational audit boundary.</p> : auditQuery.isLoading ? <p>Loading audit evidence…</p> : auditQuery.error ? <p>Audit visibility requires a manager or owner role. No audit data is inferred when authorization is denied.</p> : auditQuery.data?.length ? <div className="compact-list">{auditQuery.data.map(({ event, actor }) => <div key={event.id}><span>{event.eventType}</span><b>{event.resourceType ?? "organization record"}</b><small>{actor?.name ?? actor?.email ?? "System"} · {new Date(event.createdAt).toLocaleString()}</small></div>)}</div> : <p>No audit events have been recorded for this tenant yet.</p>}
       </section>
 
       <section className="readiness-board">

@@ -1228,6 +1228,16 @@ export async function getOperationsOverview(organizationId: number) {
   };
 }
 
+export async function listOrganizationAuditEvents(organizationId: number, limit = 100) {
+  const database = await requireDb();
+  return database.select({ event: auditEvents, actor: { id: users.id, name: users.name, email: users.email } })
+    .from(auditEvents)
+    .leftJoin(users, eq(auditEvents.actorUserId, users.id))
+    .where(eq(auditEvents.organizationId, organizationId))
+    .orderBy(desc(auditEvents.createdAt))
+    .limit(Math.min(Math.max(limit, 1), 200));
+}
+
 export async function createSustainabilityScenario(input: {
   organizationId: number;
   siteId?: number;

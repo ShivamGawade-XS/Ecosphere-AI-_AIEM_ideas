@@ -10,6 +10,7 @@ const database = vi.hoisted(() => ({
   listSites: vi.fn(),
   createSustainabilityAction: vi.fn(),
   listSustainabilityActions: vi.fn(),
+  listOrganizationAuditEvents: vi.fn(),
   updateSustainabilityActionStatus: vi.fn(),
   getOperationsOverview: vi.fn(),
   createSustainabilityScenario: vi.fn(),
@@ -83,6 +84,7 @@ describe("EcoSphere core API", () => {
     database.listSites.mockResolvedValue([{ id: 13, organizationId: 8, name: "AIEM Main Campus" }]);
     database.createSustainabilityAction.mockResolvedValue({ id: 71 });
     database.listSustainabilityActions.mockResolvedValue([]);
+    database.listOrganizationAuditEvents.mockResolvedValue([]);
     database.updateSustainabilityActionStatus.mockResolvedValue({ id: 71, status: "completed" });
     database.getOperationsOverview.mockResolvedValue({ siteCount: 1, meterCount: 1, readingCount: 0, actionCount: 0, activeActionCount: 0, latestReadingAt: null });
     database.createSustainabilityScenario.mockResolvedValue({ id: 84 });
@@ -363,6 +365,15 @@ describe("EcoSphere core API", () => {
     database.getOrganizationMembership.mockResolvedValueOnce(undefined);
     await expect(caller.lineage.importFile({ organizationId: 9, importFileId: 22 })).rejects.toMatchObject<Partial<TRPCError>>({ code: "FORBIDDEN" });
     expect(database.getImportLineage).not.toHaveBeenCalledWith(9, 22);
+  });
+
+  it("keeps operational audit evidence behind governance roles and applies the tenant-bound result limit", async () => {
+    const caller = appRouter.createCaller(createAuthenticatedContext());
+    await expect(caller.audit.list({ organizationId: 8, limit: 20 })).rejects.toMatchObject<Partial<TRPCError>>({ code: "FORBIDDEN" });
+    database.getOrganizationMembership.mockResolvedValue({ organizationId: 8, userId: 17, role: "manager" });
+    database.listOrganizationAuditEvents.mockResolvedValue([{ event: { id: 44, eventType: "action.created" }, actor: { id: 17, name: "Operator", email: "operator@example.test" } }]);
+    await expect(caller.audit.list({ organizationId: 8, limit: 20 })).resolves.toHaveLength(1);
+    expect(database.listOrganizationAuditEvents).toHaveBeenCalledWith(8, 20);
   });
 
   it("keeps monitoring target configuration, recovery retry, and owner alert routing behind governance roles", async () => {

@@ -519,6 +519,15 @@ export const appRouter = router({
       }),
   }),
 
+  audit: router({
+    list: protectedProcedure
+      .input(z.object({ organizationId: z.number().int().positive(), limit: z.number().int().min(1).max(200).default(100) }))
+      .query(async ({ ctx, input }) => {
+        await requireOrganizationRole(ctx.user.id, input.organizationId, governanceRoles);
+        return db.listOrganizationAuditEvents(input.organizationId, input.limit);
+      }),
+  }),
+
   forecasts: router({
     list: protectedProcedure
       .input(z.object({ organizationId: z.number().int().positive() }))

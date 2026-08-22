@@ -113,6 +113,15 @@
 - [ ] Add health, observability, backup/recovery, CI-quality, accessibility, performance, and release-operation foundations.
 - [ ] Validate full production-release journeys and document remaining external deployment or integration dependencies honestly.
 
+### R4 — Security, Observability, Accessibility, and Release Operations
+
+- [ ] Add invitation-ready role-management controls and a tenant-scoped audit-event viewer with protected administration APIs.
+- [ ] Add health and readiness endpoints with structured monitoring telemetry and explicit dependency status.
+- [ ] Add CI-ready quality scripts, migration safety documentation, backup/recovery runbook, and production environment checklist.
+- [ ] Complete an accessibility review for keyboard flow, labels, live regions, focus visibility, and error states across workspaces.
+- [ ] Reduce the main JavaScript bundle through route-level loading boundaries and document remaining performance limits.
+- [ ] Add deterministic API and workspace tests for audit boundaries, health readiness, administration authorization, and new operational views.
+
 ### R3 — Decision Support and Reporting
 
 - [x] Add deterministic short-horizon forecasting with versioned methods, backtesting metrics, and explicit insufficiency states.

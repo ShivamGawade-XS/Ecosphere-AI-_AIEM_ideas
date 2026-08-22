@@ -5,11 +5,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const useStatus = vi.fn();
 const useOrganizations = vi.fn();
+const useAudit = vi.fn();
 
 vi.mock("@/lib/trpc", () => ({
   trpc: {
     implementation: { status: { useQuery: () => useStatus() } },
     organizations: { mine: { useQuery: () => useOrganizations() } },
+    audit: { list: { useQuery: () => useAudit() } },
   },
 }));
 
@@ -38,6 +40,7 @@ describe("ImplementationDashboard", () => {
   beforeEach(() => {
     useStatus.mockReturnValue(readyStatus());
     useOrganizations.mockReturnValue({ data: [{ organization: { id: 1 } }], isLoading: false, error: null });
+    useAudit.mockReturnValue({ data: [], isLoading: false, error: null });
   });
 
   it("renders a loading state while readiness evidence is requested", () => {
@@ -61,5 +64,32 @@ describe("ImplementationDashboard", () => {
     render(<ImplementationDashboard />);
     expect(screen.getByText("Readiness data is unavailable.")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
+  });
+
+  it("renders recent tenant audit evidence when the current role is authorized", () => {
+    useAudit.mockReturnValue({
+      data: [{
+        event: { id: 41, eventType: "action.updated", resourceType: "sustainability_action", createdAt: new Date("2026-08-22T08:30:00.000Z") },
+        actor: { name: "Campus Manager", email: "manager@example.test" },
+      }],
+      isLoading: false,
+      error: null,
+    });
+
+    render(<ImplementationDashboard />);
+
+    expect(screen.getByRole("region", { name: "Operational audit evidence" })).toBeTruthy();
+    expect(screen.getByText("action.updated")).toBeTruthy();
+    expect(screen.getByText("sustainability_action")).toBeTruthy();
+    expect(screen.getByText(/Campus Manager/)).toBeTruthy();
+  });
+
+  it("does not infer audit records when the viewer is not a manager or owner", () => {
+    useAudit.mockReturnValue({ data: undefined, isLoading: false, error: new Error("forbidden") });
+
+    render(<ImplementationDashboard />);
+
+    expect(screen.getByText("Audit visibility requires a manager or owner role. No audit data is inferred when authorization is denied.")).toBeTruthy();
+    expect(screen.queryByText("action.updated")).toBeNull();
   });
 });
