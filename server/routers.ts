@@ -1,7 +1,7 @@
 import { TRPCError } from "@trpc/server";
 import { createHash } from "node:crypto";
 import { z } from "zod";
-import { actionPriorities, actionStatuses, anomalySeverities, readingSources, resourceTypes } from "../drizzle/schema";
+import { actionPriorities, actionStatuses, anomalySeverities, organizationRoles, readingSources, resourceTypes } from "../drizzle/schema";
 import * as db from "./db";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
@@ -64,6 +64,27 @@ export const appRouter = router({
     create: protectedProcedure
       .input(z.object({ name: z.string().trim().min(3).max(160) }))
       .mutation(({ ctx, input }) => db.createOrganizationForUser({ userId: ctx.user.id, name: input.name })),
+    members: protectedProcedure
+      .input(z.object({ organizationId: z.number().int().positive() }))
+      .query(async ({ ctx, input }) => {
+        await requireOrganizationRole(ctx.user.id, input.organizationId, governanceRoles);
+        return db.listOrganizationMembers(input.organizationId);
+      }),
+    updateMemberRole: protectedProcedure
+      .input(z.object({
+        organizationId: z.number().int().positive(),
+        memberUserId: z.number().int().positive(),
+        role: z.enum(organizationRoles),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        await requireOrganizationRole(ctx.user.id, input.organizationId, ["owner"]);
+        const result = await db.updateOrganizationMemberRole({ ...input, actorUserId: ctx.user.id });
+        if (result.status === "not_found") throw new TRPCError({ code: "NOT_FOUND", message: "Member not found in this organization." });
+        if (result.status === "sole_owner_protected") {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Add or retain another owner before changing the sole owner's role." });
+        }
+        return result;
+      }),
   }),
 
   sites: router({

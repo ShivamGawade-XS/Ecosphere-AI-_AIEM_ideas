@@ -7,6 +7,11 @@ const database = vi.hoisted(() => ({
   getMeterById: vi.fn(),
   ingestReading: vi.fn(),
   listOrganizationsForUser: vi.fn(),
+  listOrganizationMembers: vi.fn(),
+  updateOrganizationMemberRole: vi.fn(),
+  getDataImportFileByKey: vi.fn(),
+  listDataImportRows: vi.fn(),
+  commitDataImport: vi.fn(),
   listSites: vi.fn(),
   createSustainabilityAction: vi.fn(),
   listSustainabilityActions: vi.fn(),
@@ -81,6 +86,11 @@ describe("EcoSphere core API", () => {
     database.getMeterById.mockResolvedValue({ id: 44, organizationId: 8, siteId: 13, canonicalUnit: "kWh", isActive: true });
     database.ingestReading.mockResolvedValue({ reading: { id: 99 }, idempotent: false });
     database.listOrganizationsForUser.mockResolvedValue([{ organization: { id: 8, name: "AIEM Campus" }, membership: { role: "owner" } }]);
+    database.listOrganizationMembers.mockResolvedValue([{ membership: { id: 3, organizationId: 8, userId: 17, role: "owner" }, user: { id: 17, name: "AIEM Operator", email: "operator@example.test" } }]);
+    database.updateOrganizationMemberRole.mockResolvedValue({ status: "updated", membership: { id: 3, organizationId: 8, userId: 17, role: "manager" } });
+    database.getDataImportFileByKey.mockResolvedValue({ id: 22, organizationId: 8, fileName: "readings.csv", status: "processing" });
+    database.listDataImportRows.mockResolvedValue([{ id: 41, importFileId: 22, rowNumber: 2, status: "valid" }]);
+    database.commitDataImport.mockResolvedValue({ importFileId: 22, committed: 0, quarantined: 1, idempotent: true });
     database.listSites.mockResolvedValue([{ id: 13, organizationId: 8, name: "AIEM Main Campus" }]);
     database.createSustainabilityAction.mockResolvedValue({ id: 71 });
     database.listSustainabilityActions.mockResolvedValue([]);
@@ -344,6 +354,22 @@ describe("EcoSphere core API", () => {
     expect(database.approveEmissionFactor).toHaveBeenCalledWith({ organizationId: 8, factorId: 31, userId: 17 });
   });
 
+  it("reuses a tenant-owned CSV preview and commit outcome for deterministic import replays", async () => {
+    const caller = appRouter.createCaller(createAuthenticatedContext());
+    const preview = await caller.imports.preview({ organizationId: 8, fileName: "readings.csv", csvText: "meterKey,observedAt,value,unit\nhvac-main,2026-08-22T00:00:00.000Z,100,kWh" });
+    const commit = await caller.imports.commit({ organizationId: 8, importFileId: 22 });
+
+    expect(preview).toMatchObject({ idempotent: true, importFile: { id: 22 }, previewRows: [{ id: 41, status: "valid" }] });
+    expect(database.getDataImportFileByKey).toHaveBeenCalledWith(8, expect.stringMatching(/^csv-preview:/));
+    expect(database.listDataImportRows).toHaveBeenCalledWith(8, 22);
+    expect(commit).toMatchObject({ importFileId: 22, idempotent: true });
+    expect(database.commitDataImport).toHaveBeenCalledWith({ organizationId: 8, importFileId: 22, userId: 17 });
+
+    database.getOrganizationMembership.mockResolvedValueOnce(undefined);
+    await expect(caller.imports.commit({ organizationId: 9, importFileId: 22 })).rejects.toMatchObject<Partial<TRPCError>>({ code: "FORBIDDEN" });
+    expect(database.commitDataImport).not.toHaveBeenCalledWith({ organizationId: 9, importFileId: 22, userId: 17 });
+  });
+
   it("requires governance role and immutable source reference for a reading correction", async () => {
     database.getOrganizationMembership.mockResolvedValue({ organizationId: 8, userId: 17, role: "manager" });
     const caller = appRouter.createCaller(createAuthenticatedContext());
@@ -374,6 +400,31 @@ describe("EcoSphere core API", () => {
     database.listOrganizationAuditEvents.mockResolvedValue([{ event: { id: 44, eventType: "action.created" }, actor: { id: 17, name: "Operator", email: "operator@example.test" } }]);
     await expect(caller.audit.list({ organizationId: 8, limit: 20 })).resolves.toHaveLength(1);
     expect(database.listOrganizationAuditEvents).toHaveBeenCalledWith(8, 20);
+  });
+
+  it("allows governance roles to list tenant members but limits role changes to an owner", async () => {
+    const caller = appRouter.createCaller(createAuthenticatedContext());
+    await expect(caller.organizations.members({ organizationId: 8 })).rejects.toMatchObject<Partial<TRPCError>>({ code: "FORBIDDEN" });
+    await expect(caller.organizations.updateMemberRole({ organizationId: 8, memberUserId: 22, role: "manager" })).rejects.toMatchObject<Partial<TRPCError>>({ code: "FORBIDDEN" });
+
+    database.getOrganizationMembership.mockResolvedValue({ organizationId: 8, userId: 17, role: "manager" });
+    await expect(caller.organizations.members({ organizationId: 8 })).resolves.toHaveLength(1);
+    expect(database.listOrganizationMembers).toHaveBeenCalledWith(8);
+
+    database.getOrganizationMembership.mockResolvedValue({ organizationId: 8, userId: 17, role: "owner" });
+    await expect(caller.organizations.updateMemberRole({ organizationId: 8, memberUserId: 22, role: "manager" })).resolves.toMatchObject({ status: "updated" });
+    expect(database.updateOrganizationMemberRole).toHaveBeenCalledWith({ organizationId: 8, memberUserId: 22, role: "manager", actorUserId: 17 });
+  });
+
+  it("returns a controlled validation failure when changing the sole owner's role", async () => {
+    database.getOrganizationMembership.mockResolvedValue({ organizationId: 8, userId: 17, role: "owner" });
+    database.updateOrganizationMemberRole.mockResolvedValue({ status: "sole_owner_protected", membership: { id: 3, organizationId: 8, userId: 17, role: "owner" } });
+    const caller = appRouter.createCaller(createAuthenticatedContext());
+
+    await expect(caller.organizations.updateMemberRole({ organizationId: 8, memberUserId: 17, role: "manager" })).rejects.toMatchObject<Partial<TRPCError>>({
+      code: "BAD_REQUEST",
+      message: "Add or retain another owner before changing the sole owner's role.",
+    });
   });
 
   it("keeps monitoring target configuration, recovery retry, and owner alert routing behind governance roles", async () => {

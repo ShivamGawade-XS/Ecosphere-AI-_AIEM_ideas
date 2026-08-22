@@ -106,21 +106,21 @@
 ## Production Delivery Programme
 
 - [x] Create a production release roadmap with explicit scope, dependency, claim-safety, and acceptance gates.
-- [ ] Build CSV import, quarantine, correction, lineage, and governed emissions-factor foundations.
+- [x] Build CSV import, quarantine, correction, lineage, and governed emissions-factor foundations.
 - [x] Activate deployed-style monitoring health, durable retry/recovery, alert routing, and scheduler operational runbooks.
 - [x] Build forecast, evidence-linked recommendation, action collaboration, comparison, and reporting modules.
-- [ ] Add invitation/role management, security controls, audit views, and administration workflows.
-- [ ] Add health, observability, backup/recovery, CI-quality, accessibility, performance, and release-operation foundations.
-- [ ] Validate full production-release journeys and document remaining external deployment or integration dependencies honestly.
+- [x] Add invitation/role management, security controls, audit views, and administration workflows.
+- [x] Add health, observability, backup/recovery, CI-quality, accessibility, performance, and release-operation foundations.
+- [x] Validate full production-release journeys and document remaining external deployment or integration dependencies honestly.
 
 ### R4 — Security, Observability, Accessibility, and Release Operations
 
-- [ ] Add invitation-ready role-management controls and a tenant-scoped audit-event viewer with protected administration APIs.
-- [ ] Add health and readiness endpoints with structured monitoring telemetry and explicit dependency status.
-- [ ] Add CI-ready quality scripts, migration safety documentation, backup/recovery runbook, and production environment checklist.
-- [ ] Complete an accessibility review for keyboard flow, labels, live regions, focus visibility, and error states across workspaces.
-- [ ] Reduce the main JavaScript bundle through route-level loading boundaries and document remaining performance limits.
-- [ ] Add deterministic API and workspace tests for audit boundaries, health readiness, administration authorization, and new operational views.
+- [x] Add invitation-ready role-management controls and a tenant-scoped audit-event viewer with protected administration APIs.
+- [x] Add health and readiness endpoints with structured monitoring telemetry and explicit dependency status.
+- [x] Add CI-ready quality scripts, migration safety documentation, backup/recovery runbook, and production environment checklist.
+- [x] Complete an accessibility review for keyboard flow, labels, live regions, focus visibility, and error states across workspaces.
+- [x] Reduce the main JavaScript bundle through route-level loading boundaries and document remaining performance limits.
+- [x] Add deterministic API and workspace tests for audit boundaries, health readiness, administration authorization, and new operational views.
 
 ### R3 — Decision Support and Reporting
 
@@ -140,7 +140,7 @@
 - [x] Add approved-factor selection to carbon calculations while retaining the clearly labeled pilot fallback only where appropriate.
 - [x] Add protected factor-library, import, quarantine, correction, and lineage APIs with role checks.
 - [x] Add functional Data Quality workspace controls and import/factor/evidence views with loading, error, and empty states.
-- [ ] Add unit, API, and browser tests for import validation, replay idempotency, factor selection, correction lineage, and tenant isolation.
+- [x] Add unit, API, and browser tests for import validation, replay idempotency, factor selection, correction lineage, and tenant isolation.
 - [x] Add tenant-scoped lineage APIs for import-file, quarantined-row, reading, provenance, and correction chains with authorization tests.
 - [x] Add correction and lineage evidence views with loading, empty, and explicit error states for imports, quarantine, factors, and reading corrections.
 - [x] Add mutation-error feedback for CSV preview/commit and factor workflows, then verify the recovery states in tests.

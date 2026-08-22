@@ -159,6 +159,38 @@ describe("IngestionWorkbench", () => {
     expect(await screen.findByText("A manager must use a distinct approved source version.")).toBeTruthy();
   });
 
+  it("renders the governed factor selected by the worker with its version, unit, and approval evidence", async () => {
+    queryMocks.organizationsMine.mockReturnValue({ data: [{ organization: { id: 8 } }], isLoading: false, error: null });
+    queryMocks.factorsList.mockReturnValue({ data: [{ id: 31, factorVersion: "goa-grid-2026", emittedKgCo2ePerUnit: "0.700000", inputUnit: "kWh", status: "approved", approvedAt: new Date("2026-08-21T00:00:00.000Z") }], isLoading: false, error: null });
+    render(<IngestionWorkbench />);
+
+    expect(await screen.findByText("goa-grid-2026")).toBeTruthy();
+    expect(screen.getByText("0.700000 kgCO₂e/kWh")).toBeTruthy();
+    expect(screen.getAllByText(/approved/).length).toBeGreaterThan(0);
+  });
+
+  it("renders tenant-scoped correction lineage without hiding the original source reading", async () => {
+    queryMocks.organizationsMine.mockReturnValue({ data: [{ organization: { id: 8 } }], isLoading: false, error: null });
+    queryMocks.readingsRecent.mockReturnValue({ data: [{ reading: { id: 99, value: "100", unit: "kWh" }, meter: { displayName: "HVAC Electricity" } }], isLoading: false, error: null });
+    queryMocks.readingLineage.mockReturnValue({ data: { reading: { id: 99, source: "csv", supersededAt: new Date("2026-08-22T00:00:00.000Z") }, corrections: [{ id: 41, correctedReadingId: 101, status: "applied", reason: "Corrected verified transcription", approvedAt: new Date("2026-08-22T00:01:00.000Z") }], appliedCorrection: { id: 41, status: "applied", reason: "Corrected verified transcription" } }, isLoading: false, isError: false, error: null });
+    render(<IngestionWorkbench />);
+
+    expect(await screen.findByText("source reading")).toBeTruthy();
+    expect(screen.getByText("correction #41")).toBeTruthy();
+    expect(screen.getAllByText(/Corrected verified transcription/).length).toBeGreaterThan(0);
+  });
+
+  it("shows protected factor and lineage failures instead of inferring tenant governance evidence", async () => {
+    queryMocks.organizationsMine.mockReturnValue({ data: [{ organization: { id: 8 } }], isLoading: false, error: null });
+    queryMocks.factorsList.mockReturnValue({ data: undefined, isLoading: false, isError: true, error: new Error("forbidden") });
+    queryMocks.readingsRecent.mockReturnValue({ data: [{ reading: { id: 99, value: "100", unit: "kWh" }, meter: { displayName: "HVAC Electricity" } }], isLoading: false, error: null });
+    queryMocks.readingLineage.mockReturnValue({ data: undefined, isLoading: false, isError: true, error: new Error("forbidden") });
+    render(<IngestionWorkbench />);
+
+    expect(await screen.findByText("Factor evidence is unavailable: forbidden")).toBeTruthy();
+    expect(screen.getByText("Correction lineage is unavailable: forbidden")).toBeTruthy();
+  });
+
   it("surfaces CSV preview failures without silently accepting a source file", async () => {
     queryMocks.organizationsMine.mockReturnValue({ data: [{ organization: { id: 8 } }], isLoading: false, error: null });
     mutationMocks.previewCsv.mockImplementation((options: { onError?: (error: Error) => void }) => ({ isPending: false, mutate: () => options.onError?.(new Error("CSV headers do not match the required source contract.")) }));

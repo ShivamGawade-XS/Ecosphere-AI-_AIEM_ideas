@@ -104,3 +104,66 @@ describe("recommendation action attribution persistence", () => {
     expect(inserts[1]).toMatchObject({ eventType: "recommendation.accepted_as_action", payload: { actionId: 71, scenarioId: 84, comparisonId: 12 } });
   });
 });
+
+describe("organization member role persistence", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    process.env.DATABASE_URL = "mysql://organization-membership-test";
+  });
+
+  afterEach(() => {
+    delete process.env.DATABASE_URL;
+    vi.clearAllMocks();
+  });
+
+  it("prevents a sole owner from being demoted without writing a membership or audit change", async () => {
+    const updates: Record<string, unknown>[] = [];
+    const inserts: Record<string, unknown>[] = [];
+    const selectResults = [
+      [{ id: 3, organizationId: 8, userId: 17, role: "owner" }],
+      [{ total: 1 }],
+    ];
+    const tx = {
+      select: vi.fn(() => {
+        const result = selectResults.shift() ?? [];
+        const chain = { from: vi.fn(() => chain), where: vi.fn(() => chain), limit: vi.fn(async () => result), then: (resolve: (value: unknown[]) => unknown) => Promise.resolve(result).then(resolve) };
+        return chain;
+      }),
+      update: vi.fn(() => ({ set: vi.fn((values: Record<string, unknown>) => { updates.push(values); return { where: vi.fn(async () => undefined) }; }) })),
+      insert: vi.fn(() => ({ values: vi.fn((values: Record<string, unknown>) => { inserts.push(values); return Promise.resolve(); }) })),
+    };
+    mysql.drizzle.mockReturnValue({ transaction: vi.fn(async (callback: (transaction: typeof tx) => Promise<unknown>) => callback(tx)) });
+    const db = await import("./db");
+
+    await expect(db.updateOrganizationMemberRole({ organizationId: 8, memberUserId: 17, role: "manager", actorUserId: 17 })).resolves.toMatchObject({ status: "sole_owner_protected" });
+    expect(updates).toEqual([]);
+    expect(inserts).toEqual([]);
+  });
+
+  it("persists a permitted role update with before-and-after audit evidence", async () => {
+    const updates: Record<string, unknown>[] = [];
+    const inserts: Record<string, unknown>[] = [];
+    const tx = {
+      select: vi.fn(() => {
+        const result = [{ id: 4, organizationId: 8, userId: 22, role: "viewer" }];
+        const chain = { from: vi.fn(() => chain), where: vi.fn(() => chain), limit: vi.fn(async () => result), then: (resolve: (value: unknown[]) => unknown) => Promise.resolve(result).then(resolve) };
+        return chain;
+      }),
+      update: vi.fn(() => ({ set: vi.fn((values: Record<string, unknown>) => { updates.push(values); return { where: vi.fn(async () => undefined) }; }) })),
+      insert: vi.fn(() => ({ values: vi.fn((values: Record<string, unknown>) => { inserts.push(values); return Promise.resolve(); }) })),
+    };
+    mysql.drizzle.mockReturnValue({ transaction: vi.fn(async (callback: (transaction: typeof tx) => Promise<unknown>) => callback(tx)) });
+    const db = await import("./db");
+
+    await expect(db.updateOrganizationMemberRole({ organizationId: 8, memberUserId: 22, role: "manager", actorUserId: 17 })).resolves.toMatchObject({ status: "updated", membership: { id: 4, role: "manager" } });
+    expect(updates).toContainEqual({ role: "manager" });
+    expect(inserts).toContainEqual(expect.objectContaining({
+      organizationId: 8,
+      actorUserId: 17,
+      eventType: "membership.role_updated",
+      resourceType: "organization_membership",
+      resourceId: "4",
+      payload: { memberUserId: 22, previousRole: "viewer", nextRole: "manager" },
+    }));
+  });
+});

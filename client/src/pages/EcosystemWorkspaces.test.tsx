@@ -4,7 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const testApi = vi.hoisted(() => ({
-  organizationsMine: vi.fn(), overview: vi.fn(), recentReadings: vi.fn(), actionList: vi.fn(), actionCollaboration: vi.fn(), siteList: vi.fn(), meterList: vi.fn(),
+  organizationsMine: vi.fn(), organizationMembers: vi.fn(), overview: vi.fn(), recentReadings: vi.fn(), actionList: vi.fn(), actionCollaboration: vi.fn(), siteList: vi.fn(), meterList: vi.fn(),
   intelligenceReadiness: vi.fn(), monitoringOverview: vi.fn(), monitoringStatus: vi.fn(), monitoringHealth: vi.fn(), alertRouting: vi.fn(), deliveryAttempts: vi.fn(), escalationPolicy: vi.fn(), escalations: vi.fn(), forecastList: vi.fn(), recommendationList: vi.fn(), comparisonList: vi.fn(), reportsSummary: vi.fn(), reportSnapshots: vi.fn(), scenarioList: vi.fn(), invalidate: vi.fn().mockResolvedValue(undefined),
   actionCreateMode: "success" as "success" | "error", scenarioPreviewMode: "success" as "success" | "error", scenarioSaveMode: "success" as "success" | "error",
   scenarioPreviewData: undefined as unknown,
@@ -13,10 +13,10 @@ const testApi = vi.hoisted(() => ({
 vi.mock("@/lib/trpc", () => ({
   trpc: {
     useUtils: () => ({
-      organizations: { mine: { invalidate: testApi.invalidate } }, sites: { list: { invalidate: testApi.invalidate } }, meters: { list: { invalidate: testApi.invalidate } },
+      organizations: { mine: { invalidate: testApi.invalidate }, members: { invalidate: testApi.invalidate } }, sites: { list: { invalidate: testApi.invalidate } }, meters: { list: { invalidate: testApi.invalidate } },
       actions: { list: { invalidate: testApi.invalidate }, collaboration: { invalidate: testApi.invalidate } }, scenarios: { list: { invalidate: testApi.invalidate } }, comparisons: { list: { invalidate: testApi.invalidate } }, forecasts: { list: { invalidate: testApi.invalidate } }, recommendations: { list: { invalidate: testApi.invalidate } }, reports: { snapshots: { invalidate: testApi.invalidate } }, analytics: { overview: { invalidate: testApi.invalidate } }, monitoring: { status: { invalidate: testApi.invalidate }, health: { invalidate: testApi.invalidate } }, alertRouting: { get: { invalidate: testApi.invalidate }, deliveries: { invalidate: testApi.invalidate } }, alertEscalation: { get: { invalidate: testApi.invalidate }, list: { invalidate: testApi.invalidate } }, intelligence: { readiness: { invalidate: testApi.invalidate } },
     }),
-    organizations: { mine: { useQuery: () => testApi.organizationsMine() }, create: { useMutation: () => ({ isPending: false, mutate: vi.fn() }) } },
+    organizations: { mine: { useQuery: () => testApi.organizationsMine() }, members: { useQuery: () => testApi.organizationMembers() }, create: { useMutation: () => ({ isPending: false, mutate: vi.fn() }) }, updateMemberRole: { useMutation: () => ({ isPending: false, mutate: vi.fn() }) } },
     operations: { overview: { useQuery: () => testApi.overview() } },
     readings: { recent: { useQuery: () => testApi.recentReadings() } },
     sites: { list: { useQuery: () => testApi.siteList() }, create: { useMutation: () => ({ isPending: false, mutate: vi.fn() }) } },
@@ -49,6 +49,7 @@ const tenant = [{ organization: { id: 1, name: "AIEM Campus Pilot" }, membership
 describe("authenticated ecosystem workspaces", () => {
   beforeEach(() => {
     testApi.organizationsMine.mockReturnValue(query(tenant));
+    testApi.organizationMembers.mockReturnValue(query([{ membership: { id: 11, organizationId: 1, userId: 17, role: "owner", createdAt: new Date("2026-08-22T00:00:00.000Z") }, user: { id: 17, name: "AIEM Owner", email: "owner@example.test" } }]));
     testApi.overview.mockReturnValue(query({ siteCount: 1, meterCount: 2, readingCount: 3, actionCount: 1, activeActionCount: 1, latestReadingAt: new Date() }));
     testApi.recentReadings.mockReturnValue(query([]));
     testApi.actionList.mockReturnValue(query([]));
@@ -87,6 +88,17 @@ describe("authenticated ecosystem workspaces", () => {
     expect(screen.getByText("ACTIVE ACTIONS")).toBeTruthy();
   });
 
+  it("keeps protected overview, reading, and action failures explicit instead of fabricating empty dashboard state", () => {
+    testApi.overview.mockReturnValue({ ...query(undefined), error: new Error("network") });
+    testApi.recentReadings.mockReturnValue({ ...query(undefined), error: new Error("forbidden") });
+    testApi.actionList.mockReturnValue({ ...query(undefined), error: new Error("forbidden") });
+    render(<OperationsOverview />);
+
+    expect(screen.getByText("Some protected operational evidence is unavailable. The overview preserves unknown values instead of inferring an empty tenant state.")).toBeTruthy();
+    expect(screen.getByText("Reading evidence is unavailable. No empty-state conclusion is inferred.")).toBeTruthy();
+    expect(screen.getByText("Action evidence is unavailable. No empty-state conclusion is inferred.")).toBeTruthy();
+  });
+
   it("renders registry, intelligence, action, and report workspaces as distinct operational surfaces", () => {
     const { unmount } = render(<RegistryWorkspace />);
     expect(screen.getByRole("heading", { name: "Define what can be measured." })).toBeTruthy();
@@ -106,6 +118,34 @@ describe("authenticated ecosystem workspaces", () => {
     render(<ScenarioWorkspace />);
     expect(screen.getByRole("heading", { name: "Model an intervention before you fund it." })).toBeTruthy();
     expect(screen.getByText("Awaiting calculation")).toBeTruthy();
+  });
+
+  it("keeps Reports and Scenarios controls explicitly labeled for keyboard and assistive-technology use", () => {
+    const { unmount } = render(<ReportsWorkspace />);
+    expect(screen.getByLabelText("Evidence snapshot title")).toBeTruthy();
+    unmount();
+
+    render(<ScenarioWorkspace />);
+    expect(screen.getByLabelText("Scenario name")).toBeTruthy();
+    expect(screen.getByLabelText("Scenario site")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Calculate on server" })).toBeTruthy();
+  });
+
+  it("shows owner-only role controls for existing tenant members without representing invitations as delivered", () => {
+    render(<RegistryWorkspace />);
+
+    expect(screen.getByRole("region", { name: "Tenant access administration" })).toBeTruthy();
+    expect(screen.getByText("AIEM Owner")).toBeTruthy();
+    expect((screen.getByLabelText("Role for AIEM Owner") as HTMLSelectElement).value).toBe("owner");
+    expect(screen.getByText(/Invitation delivery is not configured in this deployment\./)).toBeTruthy();
+  });
+
+  it("keeps the member list empty when its protected API denies visibility", () => {
+    testApi.organizationMembers.mockReturnValue({ ...query(undefined), error: new Error("forbidden") });
+    render(<RegistryWorkspace />);
+
+    expect(screen.getByText("Member visibility requires a manager or owner role. No member records are inferred when authorization is denied.")).toBeTruthy();
+    expect(screen.queryByText("AIEM Owner")).toBeNull();
   });
 
   it("makes protected query failures explicit rather than fabricating operational state", () => {

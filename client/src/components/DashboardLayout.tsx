@@ -159,6 +159,7 @@ function DashboardLayoutContent({
 
   return (
     <>
+      <a className="skip-link" href="#workspace-content">Skip to workspace</a>
       <div className="relative" ref={sidebarRef}>
         <Sidebar
           collapsible="icon"
@@ -263,7 +264,7 @@ function DashboardLayoutContent({
             </div>
           </div>
         )}
-        <main className="flex-1 p-4">{children}</main>
+        <main id="workspace-content" className="flex-1 p-4" tabIndex={-1}>{children}</main>
       </SidebarInset>
     </>
   );

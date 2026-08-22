@@ -147,6 +147,61 @@ export async function getOrganizationMembership(userId: number, organizationId: 
   return result[0];
 }
 
+export async function listOrganizationMembers(organizationId: number) {
+  const database = await requireDb();
+  return database
+    .select({
+      membership: organizationMemberships,
+      user: { id: users.id, name: users.name, email: users.email, lastSignedIn: users.lastSignedIn },
+    })
+    .from(organizationMemberships)
+    .innerJoin(users, eq(organizationMemberships.userId, users.id))
+    .where(eq(organizationMemberships.organizationId, organizationId))
+    .orderBy(organizationMemberships.createdAt);
+}
+
+export async function updateOrganizationMemberRole(input: {
+  organizationId: number;
+  memberUserId: number;
+  role: "owner" | "manager" | "operator" | "viewer";
+  actorUserId: number;
+}) {
+  const database = await requireDb();
+  return database.transaction(async (tx) => {
+    const [membership] = await tx
+      .select()
+      .from(organizationMemberships)
+      .where(and(eq(organizationMemberships.organizationId, input.organizationId), eq(organizationMemberships.userId, input.memberUserId)))
+      .limit(1);
+
+    if (!membership) return { status: "not_found" as const };
+    if (membership.role === input.role) return { status: "unchanged" as const, membership };
+
+    if (membership.role === "owner" && input.role !== "owner") {
+      const [ownerCount] = await tx
+        .select({ total: count() })
+        .from(organizationMemberships)
+        .where(and(eq(organizationMemberships.organizationId, input.organizationId), eq(organizationMemberships.role, "owner")));
+      if (Number(ownerCount?.total ?? 0) <= 1) return { status: "sole_owner_protected" as const, membership };
+    }
+
+    await tx
+      .update(organizationMemberships)
+      .set({ role: input.role })
+      .where(eq(organizationMemberships.id, membership.id));
+    await tx.insert(auditEvents).values({
+      organizationId: input.organizationId,
+      actorUserId: input.actorUserId,
+      eventType: "membership.role_updated",
+      resourceType: "organization_membership",
+      resourceId: String(membership.id),
+      payload: { memberUserId: input.memberUserId, previousRole: membership.role, nextRole: input.role },
+    });
+
+    return { status: "updated" as const, membership: { ...membership, role: input.role } };
+  });
+}
+
 export async function createSite(input: { organizationId: number; name: string; code: string; timezone: string; userId: number }) {
   const database = await requireDb();
   return database.transaction(async (tx) => {

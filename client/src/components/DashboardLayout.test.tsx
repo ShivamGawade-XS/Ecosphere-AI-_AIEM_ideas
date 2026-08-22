@@ -27,4 +27,12 @@ describe("DashboardLayout operational index", () => {
     fireEvent.click(screen.getByText("Public narrative"));
     await waitFor(() => expect(window.location.pathname).toBe("/narrative"));
   });
+
+  it("provides a keyboard skip path to the workspace main region", () => {
+    render(<DashboardLayout><div>Workspace body</div></DashboardLayout>);
+
+    const skipLink = screen.getByRole("link", { name: "Skip to workspace" });
+    expect(skipLink.getAttribute("href")).toBe("#workspace-content");
+    expect(document.getElementById("workspace-content")?.getAttribute("tabindex")).toBe("-1");
+  });
 });

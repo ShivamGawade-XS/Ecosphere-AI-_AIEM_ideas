@@ -63,6 +63,28 @@ describe("monitoring worker", () => {
     expect(database.completeMonitoringRun).toHaveBeenCalledWith(expect.objectContaining({ runKey: "manual:new-run", readingsScanned: 4 }));
   });
 
+  it("selects the newest valid approved energy factor and persists its governed version on carbon calculations", async () => {
+    const rows = [reading(1, 100, 1), reading(2, 100, 2), reading(3, 100, 3), reading(4, 100, 4)];
+    database.beginMonitoringRun.mockResolvedValue({ created: true });
+    database.listReadingsForMonitoring.mockResolvedValue(rows);
+    database.listUnprocessedReadingsForMonitoring.mockResolvedValue(rows);
+    database.listApprovedEmissionFactors.mockResolvedValue([
+      { id: 3, resourceType: "energy", inputUnit: "kWh", emittedKgCo2ePerUnit: "0.82", factorVersion: "regional-2025", validFrom: new Date("2025-01-01T00:00:00.000Z"), validTo: null },
+      { id: 4, resourceType: "energy", inputUnit: "kwh", emittedKgCo2ePerUnit: "0.70", factorVersion: "regional-2026", validFrom: new Date("2026-08-01T00:00:00.000Z"), validTo: null },
+      { id: 5, resourceType: "energy", inputUnit: "kWh", emittedKgCo2ePerUnit: "0.60", factorVersion: "future-factor", validFrom: new Date("2026-09-01T00:00:00.000Z"), validTo: null },
+    ]);
+
+    await runMonitoringForOrganization({ organizationId: 8, runKey: "manual:governed-factor", trigger: "manual" });
+
+    expect(database.upsertCarbonCalculation).toHaveBeenCalledWith(expect.objectContaining({
+      readingId: 1,
+      emittedKgCo2e: 70,
+      emissionFactor: 0.7,
+      factorVersion: "regional-2026",
+      calculationVersion: "factor-library-carbon-v1",
+    }));
+  });
+
   it("generates evidence-linked recommendations only after a newly persisted anomaly", async () => {
     const rows = [reading(1, 100, 1), reading(2, 100, 2), reading(3, 100, 3), reading(4, 170, 4)];
     database.beginMonitoringRun.mockResolvedValue({ created: true });
