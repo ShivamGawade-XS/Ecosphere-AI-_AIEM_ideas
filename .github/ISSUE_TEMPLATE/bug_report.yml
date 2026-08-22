@@ -1,0 +1,41 @@
+name: Bug report
+description: Report a reproducible EcoSphere AI defect
+title: "bug: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: "Thank you for improving EcoSphere AI. Do not include credentials or unapproved telemetry."
+  - type: textarea
+    id: summary
+    attributes:
+      label: What happened?
+      description: Describe the observed result and the expected result.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+      placeholder: "1. Open …\n2. Select …\n3. Observe …"
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      options: [Dashboard, Telemetry, Alert center, Simulator, AI advisor, CSV ingestion, Scheduled monitoring, Documentation]
+    validations:
+      required: true
+  - type: dropdown
+    id: data_type
+    attributes:
+      label: Data context
+      options: [Seeded simulated data, Approved imported data, Not applicable, Unsure]
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: Include screenshots, console output, or relevant alert IDs. Remove sensitive information.

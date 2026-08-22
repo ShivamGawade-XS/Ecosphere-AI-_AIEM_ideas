@@ -1,0 +1,33 @@
+name: Feature request
+description: Propose a user-centred sustainability capability
+title: "feat: "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem to solve
+      description: Describe the campus sustainability decision or workflow that needs support.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed outcome
+      description: Describe the user-visible change and the expected measurement or action.
+    validations:
+      required: true
+  - type: dropdown
+    id: data
+    attributes:
+      label: Data requirement
+      options: [Uses seeded simulation only, Uses approved existing source, Requires a future approved source, No data required]
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: List verifiable conditions for the feature.
+    validations:
+      required: true

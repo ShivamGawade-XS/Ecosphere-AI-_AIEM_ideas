@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: EcoSphere AI contributing guide
+    url: https://github.com/ShivamGawade-XS/Ecosphere-AI-_AIEM_ideas/blob/main/CONTRIBUTING.md
+    about: Review contribution expectations before opening an issue.
