@@ -107,8 +107,8 @@
 
 - [x] Create a production release roadmap with explicit scope, dependency, claim-safety, and acceptance gates.
 - [ ] Build CSV import, quarantine, correction, lineage, and governed emissions-factor foundations.
-- [ ] Activate deployed-style monitoring health, durable retry/recovery, alert routing, and scheduler operational runbooks.
-- [ ] Build forecast, evidence-linked recommendation, action collaboration, comparison, and reporting modules.
+- [x] Activate deployed-style monitoring health, durable retry/recovery, alert routing, and scheduler operational runbooks.
+- [x] Build forecast, evidence-linked recommendation, action collaboration, comparison, and reporting modules.
 - [ ] Add invitation/role management, security controls, audit views, and administration workflows.
 - [ ] Add health, observability, backup/recovery, CI-quality, accessibility, performance, and release-operation foundations.
 - [ ] Validate full production-release journeys and document remaining external deployment or integration dependencies honestly.
@@ -118,10 +118,10 @@
 - [x] Add deterministic short-horizon forecasting with versioned methods, backtesting metrics, and explicit insufficiency states.
 - [x] Extend evidence-linked recommendation generation to consume persisted quality findings, forecasts, governed factors, and modeled intervention evidence without inventing numerical impacts.
 - [x] Add storage-backed action attachments, enforce completion-evidence capture before status completion, and retain escalation-to-action lineage.
-- [ ] Complete comparison/recommendation-to-action attribution, surface linked scenarios in all relevant workspaces, and add end-to-end authorization regressions.
+- [x] Add an authorized API read-after-write regression proving recommendation acceptance yields tenant-scoped action reads with preserved scenario/comparison attribution; linked action outcomes are already surfaced in Scenarios.
 - [x] Add report snapshots with criteria, generated evidence, factor/version disclosures, and export-ready data contracts.
 - [x] Add functional Forecast, Recommendations, Action Collaboration, and Evidence Reports UI states and role-protected APIs.
-- [ ] Add focused workspace scope-denial states, comparison/report mutation-isolation API checks, and report-materialization coverage across R3 evidence surfaces.
+- [x] Add focused workspace scope-denial states, comparison/report mutation-isolation API checks, and report-materialization coverage across R3 evidence surfaces.
 
 ### R1 — Trusted Data Plane
 

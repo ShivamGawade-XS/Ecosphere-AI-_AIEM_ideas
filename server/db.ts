@@ -44,6 +44,7 @@ import { planRecoveryFailure, planRecoveryRetry, shouldResolveRecovery } from ".
 import { buildMovingAverageForecast, FORECAST_CALCULATION_VERSION } from "./domain/forecasting";
 import { buildAnomalyRecommendation, RECOMMENDATION_VERSION } from "./domain/recommendations";
 import { INTERVENTION_COMPARISON_VERSION, rankScenarioInterventions } from "./domain/interventionComparison";
+import { materializeReportSnapshot } from "./domain/reportSnapshots";
 
 let databaseInstance: ReturnType<typeof drizzle> | null = null;
 
@@ -1132,6 +1133,7 @@ export async function createSustainabilityAction(input: {
   organizationId: number;
   siteId?: number;
   scenarioId?: number;
+  comparisonId?: number;
   title: string;
   description?: string;
   priority: (typeof import("../drizzle/schema").actionPriorities)[number];
@@ -1147,6 +1149,7 @@ export async function createSustainabilityAction(input: {
         organizationId: input.organizationId,
         siteId: input.siteId ?? null,
         scenarioId: input.scenarioId ?? null,
+        comparisonId: input.comparisonId ?? null,
         title: input.title,
         description: input.description ?? null,
         priority: input.priority,
@@ -1161,7 +1164,7 @@ export async function createSustainabilityAction(input: {
       eventType: "action.created",
       resourceType: "sustainability_action",
       resourceId: String(created.id),
-      payload: { priority: input.priority, siteId: input.siteId ?? null, scenarioId: input.scenarioId ?? null },
+      payload: { priority: input.priority, siteId: input.siteId ?? null, scenarioId: input.scenarioId ?? null, comparisonId: input.comparisonId ?? null },
     });
     return created;
   });
@@ -1321,11 +1324,12 @@ export async function generateAnomalyRecommendations(input: { organizationId: nu
   let created = 0;
   const recommendationIds: number[] = [];
   for (const item of anomalies) {
-    const [qualityFindings, latestForecast, carbon, latestScenario] = await Promise.all([
+    const [qualityFindings, latestForecast, carbon, latestScenario, latestComparison] = await Promise.all([
       database.select({ status: dataQualityFindings.status }).from(dataQualityFindings).where(and(eq(dataQualityFindings.organizationId, input.organizationId), eq(dataQualityFindings.readingId, item.anomaly.readingId))).limit(20),
       database.select({ id: sustainabilityForecasts.id, status: sustainabilityForecasts.status, calculationVersion: sustainabilityForecasts.calculationVersion, inputReadingCount: sustainabilityForecasts.inputReadingCount }).from(sustainabilityForecasts).where(and(eq(sustainabilityForecasts.organizationId, input.organizationId), eq(sustainabilityForecasts.meterId, item.meter.id))).orderBy(desc(sustainabilityForecasts.generatedAt)).limit(1),
       database.select({ emissionFactor: carbonCalculations.emissionFactor, factorVersion: carbonCalculations.factorVersion, calculationVersion: carbonCalculations.calculationVersion }).from(carbonCalculations).where(and(eq(carbonCalculations.organizationId, input.organizationId), eq(carbonCalculations.readingId, item.anomaly.readingId))).orderBy(desc(carbonCalculations.computedAt)).limit(1),
       database.select({ id: sustainabilityScenarios.id, name: sustainabilityScenarios.name, calculationVersion: sustainabilityScenarios.calculationVersion, results: sustainabilityScenarios.results }).from(sustainabilityScenarios).where(and(eq(sustainabilityScenarios.organizationId, input.organizationId), eq(sustainabilityScenarios.siteId, item.anomaly.siteId))).orderBy(desc(sustainabilityScenarios.updatedAt)).limit(1),
+      database.select({ id: interventionComparisons.id, name: interventionComparisons.name, scenarioIds: interventionComparisons.scenarioIds, rankingVersion: interventionComparisons.rankingVersion }).from(interventionComparisons).where(eq(interventionComparisons.organizationId, input.organizationId)).orderBy(desc(interventionComparisons.createdAt)).limit(20),
     ]);
     const recommendation = buildAnomalyRecommendation({
       anomalyId: item.anomaly.id,
@@ -1340,6 +1344,7 @@ export async function generateAnomalyRecommendations(input: { organizationId: nu
       forecast: latestForecast[0] ?? null,
       carbon: carbon[0] ? { emittedKgCo2ePerUnit: Number(carbon[0].emissionFactor), factorVersion: carbon[0].factorVersion, calculationVersion: carbon[0].calculationVersion } : null,
       scenario: latestScenario[0] ? { id: latestScenario[0].id, name: latestScenario[0].name, calculationVersion: latestScenario[0].calculationVersion, carbonReductionKg: Number(latestScenario[0].results.carbonReductionKg) } : null,
+      comparison: latestScenario[0] ? (() => { const match = latestComparison.find((comparison) => (comparison.scenarioIds as number[]).includes(latestScenario[0].id)); return match ? { id: match.id, name: match.name, rankingVersion: match.rankingVersion } : null; })() : null,
     });
     const existing = await database.select({ id: sustainabilityRecommendations.id }).from(sustainabilityRecommendations)
       .where(and(eq(sustainabilityRecommendations.anomalyId, item.anomaly.id), eq(sustainabilityRecommendations.recommendationVersion, RECOMMENDATION_VERSION))).limit(1);
@@ -1405,13 +1410,15 @@ export async function acceptRecommendationAsAction(input: { organizationId: numb
   )).limit(1);
   if (!recommendation[0]) return undefined;
   if (recommendation[0].actionId) return { actionId: recommendation[0].actionId, idempotent: true };
-  const evidence = recommendation[0].evidence as { scenario?: { id?: number } };
+  const evidence = recommendation[0].evidence as { scenario?: { id?: number }; comparison?: { id?: number } };
   const scenarioId = typeof evidence.scenario?.id === "number" ? evidence.scenario.id : null;
+  const comparisonId = typeof evidence.comparison?.id === "number" ? evidence.comparison.id : null;
   return database.transaction(async (tx) => {
     const [action] = await tx.insert(sustainabilityActions).values({
       organizationId: input.organizationId,
       siteId: recommendation[0].siteId,
       scenarioId,
+      comparisonId,
       title: recommendation[0].title,
       description: recommendation[0].rationale,
       source: "recommendation",
@@ -1420,7 +1427,7 @@ export async function acceptRecommendationAsAction(input: { organizationId: numb
       ownerUserId: input.userId,
     }).$returningId();
     await tx.update(sustainabilityRecommendations).set({ status: "accepted", actionId: action.id }).where(eq(sustainabilityRecommendations.id, input.recommendationId));
-    await tx.insert(auditEvents).values({ organizationId: input.organizationId, actorUserId: input.userId, eventType: "recommendation.accepted_as_action", resourceType: "sustainability_recommendation", resourceId: String(input.recommendationId), payload: { actionId: action.id, scenarioId } });
+    await tx.insert(auditEvents).values({ organizationId: input.organizationId, actorUserId: input.userId, eventType: "recommendation.accepted_as_action", resourceType: "sustainability_recommendation", resourceId: String(input.recommendationId), payload: { actionId: action.id, scenarioId, comparisonId } });
     return { actionId: action.id, idempotent: false };
   });
 }
@@ -1487,11 +1494,7 @@ export async function createSustainabilityReportSnapshot(input: { organizationId
     listInterventionComparisons(input.organizationId),
     listApprovedEmissionFactors(input.organizationId),
   ]);
-  const factorDisclosure = approvedFactors.length
-    ? `This evidence snapshot uses tenant-governed factor records only where calculations selected them. Approved factor references: ${approvedFactors.map((factor) => `${factor.factorVersion} (${factor.sourceName})`).join("; ")}.`
-    : "No approved tenant emission factors are currently available. Existing pilot carbon outputs may use the clearly labelled 0.82 kgCO2e/kWh fallback and are not certified or regional reporting figures.";
-  const evidence = { overview, monitoring, forecasts: forecasts.slice(0, 10), recommendations: recommendations.slice(0, 20), comparisons: comparisons.slice(0, 10) };
-  const criteria = { organizationId: input.organizationId, scope: "current tenant-bound persisted records", generatedAt: new Date().toISOString(), version: "evidence-snapshot-v1" };
+  const { criteria, evidence, factorDisclosure } = materializeReportSnapshot({ organizationId: input.organizationId, generatedAt: new Date(), overview, monitoring, forecasts, recommendations, comparisons, approvedFactors });
   const [snapshot] = await database.insert(sustainabilityReportSnapshots).values({ organizationId: input.organizationId, title: input.title, criteria, evidence, factorDisclosure, generatedByUserId: input.userId }).$returningId();
   await database.insert(auditEvents).values({ organizationId: input.organizationId, actorUserId: input.userId, eventType: "report.snapshot_generated", resourceType: "sustainability_report_snapshot", resourceId: String(snapshot.id), payload: { evidenceVersion: criteria.version } });
   return { id: snapshot.id, criteria, evidence, factorDisclosure };

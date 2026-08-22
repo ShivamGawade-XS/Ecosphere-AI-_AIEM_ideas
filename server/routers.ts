@@ -440,6 +440,7 @@ export const appRouter = router({
         organizationId: z.number().int().positive(),
         siteId: z.number().int().positive().optional(),
         scenarioId: z.number().int().positive().optional(),
+        comparisonId: z.number().int().positive().optional(),
         title: z.string().trim().min(3).max(180),
         description: z.string().trim().max(5_000).optional(),
         priority: z.enum(actionPriorities).default("medium"),
@@ -454,6 +455,9 @@ export const appRouter = router({
         }
         if (input.scenarioId && !(await db.listSustainabilityScenarios(input.organizationId)).some((scenario) => scenario.id === input.scenarioId)) {
           throw new TRPCError({ code: "NOT_FOUND", message: "Saved scenario not found in this organization." });
+        }
+        if (input.comparisonId && !(await db.listInterventionComparisons(input.organizationId)).some((comparison) => comparison.id === input.comparisonId)) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Intervention comparison not found in this organization." });
         }
         return db.createSustainabilityAction({ ...input, userId: ctx.user.id });
       }),

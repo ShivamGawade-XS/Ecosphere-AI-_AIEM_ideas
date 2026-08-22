@@ -78,6 +78,13 @@
       "when": 1787384248865,
       "tag": "0010_slim_photon",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "5",
+      "when": 1787385982815,
+      "tag": "0011_fat_lady_vermin",
+      "breakpoints": true
     }
   ]
 }

@@ -26,7 +26,7 @@ vi.mock("@/lib/trpc", () => ({
     alertRouting: { get: { useQuery: () => testApi.alertRouting() }, deliveries: { useQuery: () => testApi.deliveryAttempts() }, update: { useMutation: () => ({ isPending: false, mutate: vi.fn(), error: null }) } },
     alertEscalation: { get: { useQuery: () => testApi.escalationPolicy() }, list: { useQuery: () => testApi.escalations() }, update: { useMutation: () => ({ isPending: false, mutate: vi.fn(), error: null }) }, evaluateNow: { useMutation: () => ({ isPending: false, mutate: vi.fn(), error: null }) } },
     forecasts: { list: { useQuery: () => testApi.forecastList() }, generate: { useMutation: () => ({ isPending: false, mutate: vi.fn(), data: undefined, error: null }) } },
-    recommendations: { list: { useQuery: () => testApi.recommendationList() }, generateForOpenAnomalies: { useMutation: () => ({ isPending: false, mutate: vi.fn(), error: null }) }, updateStatus: { useMutation: () => ({ isPending: false, mutate: vi.fn(), error: null }) } },
+    recommendations: { list: { useQuery: () => testApi.recommendationList() }, generateForOpenAnomalies: { useMutation: () => ({ isPending: false, mutate: vi.fn(), error: null }) }, updateStatus: { useMutation: () => ({ isPending: false, mutate: vi.fn(), error: null }) }, acceptAsAction: { useMutation: () => ({ isPending: false, mutate: vi.fn(), error: null }) } },
     analytics: { overview: { useQuery: () => testApi.monitoringOverview() } },
     alerts: { acknowledge: { useMutation: () => ({ isPending: false, mutate: vi.fn() }) } },
     actions: { list: { useQuery: () => testApi.actionList() }, collaboration: { useQuery: () => testApi.actionCollaboration() }, create: { useMutation: (options?: { onSuccess?: () => void; onError?: () => void }) => ({ isPending: false, mutate: () => testApi.actionCreateMode === "error" ? options?.onError?.() : options?.onSuccess?.() }) }, updateStatus: { useMutation: () => ({ isPending: false, mutate: vi.fn() }) }, addComment: { useMutation: () => ({ isPending: false, mutate: vi.fn() }) }, addEvidence: { useMutation: () => ({ isPending: false, mutate: vi.fn() }) }, uploadAttachment: { useMutation: () => ({ isPending: false, mutate: vi.fn() }) } },
@@ -98,6 +98,7 @@ describe("authenticated ecosystem workspaces", () => {
     render(<ActionsWorkspace />);
     expect(screen.getByRole("heading", { name: "Turn a signal into accountable work." })).toBeTruthy();
     expect(screen.getByLabelText("Source scenario")).toBeTruthy();
+    expect(screen.getByLabelText("Source comparison")).toBeTruthy();
     cleanup();
     render(<ReportsWorkspace />);
     expect(screen.getByRole("heading", { name: "Export only what the records support." })).toBeTruthy();
@@ -123,6 +124,16 @@ describe("authenticated ecosystem workspaces", () => {
     testApi.scenarioList.mockReturnValue({ ...query(undefined), error: new Error("network") });
     render(<ScenarioWorkspace />);
     expect(screen.getByText("Scenario records could not be loaded.")).toBeTruthy();
+    cleanup();
+    testApi.scenarioList.mockReturnValue(query([]));
+    testApi.comparisonList.mockReturnValue({ ...query(undefined), error: new Error("scope") });
+    render(<ScenarioWorkspace />);
+    expect(screen.getByText("Scenario records could not be loaded.")).toBeTruthy();
+    cleanup();
+    testApi.comparisonList.mockReturnValue(query([]));
+    testApi.reportSnapshots.mockReturnValue({ ...query(undefined), error: new Error("scope") });
+    render(<ReportsWorkspace />);
+    expect(screen.getByText("Operational records could not be summarized.")).toBeTruthy();
   });
 
   it("renders pending, triggered, suppressed, and resolved escalation evidence without claiming external delivery", () => {
@@ -142,9 +153,24 @@ describe("authenticated ecosystem workspaces", () => {
   });
 
   it("renders a persisted saved-scenario attribution on an action without presenting modeled impact as realized", () => {
-    testApi.actionList.mockReturnValue(query([{ id: 71, title: "HVAC controls follow-up", description: "Review modeled controls option.", priority: "high", status: "proposed", scenarioId: 84, expectedCarbonReductionKg: null }]));
+    testApi.actionList.mockReturnValue(query([{ id: 71, title: "HVAC controls follow-up", description: "Review modeled controls option.", priority: "high", status: "proposed", scenarioId: 84, comparisonId: 12, expectedCarbonReductionKg: null }]));
     render(<ActionsWorkspace />);
     expect(screen.getByText("Modeled scenario #84 linked")).toBeTruthy();
+    expect(screen.getByText("Comparison #12 linked")).toBeTruthy();
+  });
+
+  it("shows recommendation scenario and comparison provenance before acceptance", () => {
+    testApi.recommendationList.mockReturnValue(query([{ recommendation: { id: 19, priority: "high", status: "proposed", title: "Investigate HVAC variance", anomalyId: 12, confidence: "0.8", rationale: "Persisted evidence requires review.", evidence: { scenario: { id: 84, name: "HVAC controls option" }, comparison: { id: 12, name: "HVAC ranked options" } } }, meter: { displayName: "HVAC Electricity" }, action: null }]));
+    render(<IntelligenceWorkspace />);
+    expect(screen.getByText("Modeled scenario #84: HVAC controls option")).toBeTruthy();
+    expect(screen.getByText("Comparison #12: HVAC ranked options")).toBeTruthy();
+  });
+
+  it("shows a linked tenant action in saved scenario history", () => {
+    testApi.scenarioList.mockReturnValue(query([{ id: 84, name: "HVAC controls option", results: { carbonReductionKg: 886 }, calculationVersion: "pilot-v1", updatedAt: new Date("2026-08-22T00:00:00.000Z") }]));
+    testApi.actionList.mockReturnValue(query([{ id: 71, title: "Implement selected controls", status: "proposed", scenarioId: 84, priority: "high", description: null, expectedCarbonReductionKg: null }]));
+    render(<ScenarioWorkspace />);
+    expect(screen.getByText("Linked action #71: Implement selected controls · proposed")).toBeTruthy();
   });
 
   it("covers loading and mutation feedback without concealing server outcomes", async () => {

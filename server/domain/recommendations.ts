@@ -13,6 +13,7 @@ export type AnomalyEvidenceInput = {
   forecast?: { id: number; status: string; calculationVersion: string; inputReadingCount: number } | null;
   carbon?: { emittedKgCo2ePerUnit: number; factorVersion: string; calculationVersion: string } | null;
   scenario?: { id: number; name: string; calculationVersion: string; carbonReductionKg: number } | null;
+  comparison?: { id: number; name: string; rankingVersion: string } | null;
 };
 
 export type DeterministicRecommendation = {
@@ -21,7 +22,7 @@ export type DeterministicRecommendation = {
   rationale: string;
   confidence: number;
   expectedImpact: { excessValue: number; unit: string; carbonOrSavingsEstimate: { excessKgCo2e: number; factorVersion: string; calculationVersion: string } | null; disclosure: string };
-  evidence: { anomalyId: number; baselineMean: number; observedValue: number; excessValue: number; zScore: number; detectedAt: string; qualityStatuses: string[]; forecast: AnomalyEvidenceInput["forecast"]; scenario: AnomalyEvidenceInput["scenario"] };
+  evidence: { anomalyId: number; baselineMean: number; observedValue: number; excessValue: number; zScore: number; detectedAt: string; qualityStatuses: string[]; forecast: AnomalyEvidenceInput["forecast"]; scenario: AnomalyEvidenceInput["scenario"]; comparison: AnomalyEvidenceInput["comparison"] };
 };
 
 const units: Record<AnomalyEvidenceInput["resourceType"], string> = {
@@ -66,6 +67,7 @@ export function buildAnomalyRecommendation(input: AnomalyEvidenceInput): Determi
       qualityStatuses: input.qualityStatuses ?? [],
       forecast: input.forecast ?? null,
       scenario: input.scenario ?? null,
+      comparison: input.comparison ?? null,
     },
   };
 }

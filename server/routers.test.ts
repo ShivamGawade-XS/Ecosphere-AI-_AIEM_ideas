@@ -9,9 +9,11 @@ const database = vi.hoisted(() => ({
   listOrganizationsForUser: vi.fn(),
   listSites: vi.fn(),
   createSustainabilityAction: vi.fn(),
+  listSustainabilityActions: vi.fn(),
   updateSustainabilityActionStatus: vi.fn(),
   getOperationsOverview: vi.fn(),
   createSustainabilityScenario: vi.fn(),
+  listSustainabilityScenarios: vi.fn(),
   getMonitoringStatus: vi.fn(),
   getMonitoringOverview: vi.fn(),
   acknowledgeMonitoringAlert: vi.fn(),
@@ -80,9 +82,11 @@ describe("EcoSphere core API", () => {
     database.listOrganizationsForUser.mockResolvedValue([{ organization: { id: 8, name: "AIEM Campus" }, membership: { role: "owner" } }]);
     database.listSites.mockResolvedValue([{ id: 13, organizationId: 8, name: "AIEM Main Campus" }]);
     database.createSustainabilityAction.mockResolvedValue({ id: 71 });
+    database.listSustainabilityActions.mockResolvedValue([]);
     database.updateSustainabilityActionStatus.mockResolvedValue({ id: 71, status: "completed" });
     database.getOperationsOverview.mockResolvedValue({ siteCount: 1, meterCount: 1, readingCount: 0, actionCount: 0, activeActionCount: 0, latestReadingAt: null });
     database.createSustainabilityScenario.mockResolvedValue({ id: 84 });
+    database.listSustainabilityScenarios.mockResolvedValue([]);
     database.getMonitoringStatus.mockResolvedValue({ latestRun: null, latestScore: null, openAlertCount: 0 });
     database.getMonitoringOverview.mockResolvedValue({ status: { latestRun: null, latestScore: null, openAlertCount: 0 }, alerts: [], anomalies: [], qualityFindings: [], qualityWarnings: 0, qualityFailures: 0, carbonTotals: { totalKgCo2e: 0, calculationCount: 0 } });
     database.acknowledgeMonitoringAlert.mockResolvedValue({ id: 55, status: "acknowledged" });
@@ -113,6 +117,7 @@ describe("EcoSphere core API", () => {
     database.addActionEvidence.mockResolvedValue({ id: 14 });
     database.listInterventionComparisons.mockResolvedValue([]);
     database.createInterventionComparison.mockResolvedValue({ id: 81, results: [], rankingVersion: "scenario-impact-rank-v1" });
+    database.listInterventionComparisons.mockResolvedValue([]);
     database.listSustainabilityReportSnapshots.mockResolvedValue([]);
     database.createSustainabilityReportSnapshot.mockResolvedValue({ id: 101, criteria: {}, evidence: {}, factorDisclosure: "Pilot fallback disclosed." });
     worker.runMonitoringForOrganization.mockResolvedValue({ organizationId: 8, runKey: "manual:test-run", status: "completed", readingsScanned: 1, qualityFindingsCreated: 4, anomaliesCreated: 0, alertsCreated: 0, ecoScoresUpdated: 1, latestEcoScore: 100 });
@@ -266,6 +271,34 @@ describe("EcoSphere core API", () => {
 
     expect(result.scenario).toEqual({ id: 84 });
     expect(database.createSustainabilityScenario).toHaveBeenCalledWith(expect.objectContaining({ organizationId: 8, name: "HVAC option", userId: 17, calculationVersion: "pilot-v1", results: expect.objectContaining({ carbonReductionKg: 8.2 }) }));
+  });
+
+  it("persists authorized scenario and comparison attribution when creating an action", async () => {
+    database.listSustainabilityScenarios.mockResolvedValue([{ id: 84, organizationId: 8, name: "HVAC option" }]);
+    database.listInterventionComparisons.mockResolvedValue([{ id: 12, organizationId: 8, name: "HVAC ranked options" }]);
+    const caller = appRouter.createCaller(createAuthenticatedContext());
+    await expect(caller.actions.create({ organizationId: 8, title: "Implement selected controls", priority: "high", scenarioId: 84, comparisonId: 12 })).resolves.toEqual({ id: 71 });
+    expect(database.createSustainabilityAction).toHaveBeenCalledWith(expect.objectContaining({ organizationId: 8, scenarioId: 84, comparisonId: 12, userId: 17 }));
+  });
+
+  it("delegates authorized recommendation acceptance to the tenant-scoped action handoff", async () => {
+    database.acceptRecommendationAsAction.mockResolvedValue({ actionId: 71, idempotent: false });
+    const caller = appRouter.createCaller(createAuthenticatedContext());
+    await expect(caller.recommendations.acceptAsAction({ organizationId: 8, recommendationId: 19 })).resolves.toEqual({ actionId: 71, idempotent: false });
+    expect(database.acceptRecommendationAsAction).toHaveBeenCalledWith({ organizationId: 8, recommendationId: 19, userId: 17 });
+  });
+
+  it("reads back comparison and scenario attribution after authorized recommendation acceptance", async () => {
+    let acceptedAction: { id: number; title: string; scenarioId: number; comparisonId: number; organizationId: number } | null = null;
+    database.acceptRecommendationAsAction.mockImplementation(async () => {
+      acceptedAction = { id: 71, title: "Investigate HVAC variance", scenarioId: 84, comparisonId: 12, organizationId: 8 };
+      return { actionId: 71, idempotent: false };
+    });
+    database.listSustainabilityActions.mockImplementation(async (organizationId: number) => acceptedAction && acceptedAction.organizationId === organizationId ? [acceptedAction] : []);
+    const caller = appRouter.createCaller(createAuthenticatedContext());
+
+    await caller.recommendations.acceptAsAction({ organizationId: 8, recommendationId: 19 });
+    await expect(caller.actions.list({ organizationId: 8 })).resolves.toEqual([{ id: 71, title: "Investigate HVAC variance", scenarioId: 84, comparisonId: 12, organizationId: 8 }]);
   });
 
   it("requires persisted action evidence before completion and keeps the action tenant-scoped", async () => {
