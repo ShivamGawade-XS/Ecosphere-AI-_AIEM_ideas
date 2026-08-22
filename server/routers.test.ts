@@ -4,6 +4,7 @@ import type { TrpcContext } from "./_core/context";
 
 const database = vi.hoisted(() => ({
   getOrganizationMembership: vi.fn(),
+  getDb: vi.fn(),
   getMeterById: vi.fn(),
   ingestReading: vi.fn(),
   listOrganizationsForUser: vi.fn(),
@@ -31,6 +32,9 @@ const database = vi.hoisted(() => ({
   getReadingLineage: vi.fn(),
   getMonitoringOperationalHealth: vi.fn(),
   upsertMonitoringServiceTarget: vi.fn(),
+  getSchedulerTrialConfig: vi.fn(),
+  saveSchedulerTrialDraft: vi.fn(),
+  recordSchedulerTrialActivationFailure: vi.fn(),
   markMonitoringRecoveryRetry: vi.fn(),
   getAlertRoutingPreference: vi.fn(),
   upsertAlertRoutingPreference: vi.fn(),
@@ -83,6 +87,7 @@ describe("EcoSphere core API", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     database.getOrganizationMembership.mockResolvedValue({ organizationId: 8, userId: 17, role: "operator" });
+    database.getDb.mockResolvedValue({});
     database.getMeterById.mockResolvedValue({ id: 44, organizationId: 8, siteId: 13, canonicalUnit: "kWh", isActive: true });
     database.ingestReading.mockResolvedValue({ reading: { id: 99 }, idempotent: false });
     database.listOrganizationsForUser.mockResolvedValue([{ organization: { id: 8, name: "AIEM Campus" }, membership: { role: "owner" } }]);
@@ -110,6 +115,9 @@ describe("EcoSphere core API", () => {
     database.getReadingLineage.mockResolvedValue({ reading: { id: 99 }, meter: { id: 44 }, corrections: [], appliedCorrection: null });
     database.getMonitoringOperationalHealth.mockResolvedValue({ state: "not_enabled", target: null, latestScheduledRun: null, openRecoveries: [], ageMinutes: null });
     database.upsertMonitoringServiceTarget.mockResolvedValue({ state: "healthy", target: { isEnabled: true }, latestScheduledRun: null, openRecoveries: [], ageMinutes: 0 });
+    database.getSchedulerTrialConfig.mockResolvedValue({ organizationId: 8, scheduleCronTaskUid: null, scheduleCronExpression: null, schedulerTrialStatus: "draft", expectedIntervalMinutes: 15, staleAfterMinutes: 45 });
+    database.saveSchedulerTrialDraft.mockResolvedValue({ organizationId: 8, scheduleCronTaskUid: null, scheduleCronExpression: "0 */15 * * * *", schedulerTrialStatus: "draft", expectedIntervalMinutes: 15, staleAfterMinutes: 45 });
+    database.recordSchedulerTrialActivationFailure.mockResolvedValue({ organizationId: 8, schedulerTrialStatus: "activation_failed" });
     database.markMonitoringRecoveryRetry.mockResolvedValue({ id: 9, status: "retrying", attemptCount: 1, retryRunKey: "recovery:8:9:first", started: true });
     database.getAlertRoutingPreference.mockResolvedValue(null);
     database.upsertAlertRoutingPreference.mockResolvedValue({ id: 4, isEnabled: true, minimumSeverity: "high" });
@@ -444,6 +452,39 @@ describe("EcoSphere core API", () => {
     expect(database.upsertAlertRoutingPreference).toHaveBeenCalledWith({ organizationId: 8, minimumSeverity: "high", isEnabled: true, userId: 17 });
     expect(retry.recovery).toMatchObject({ id: 9, status: "retrying" });
     expect(deliveries).toEqual([]);
+  });
+
+  it("allows governance users to draft a scheduler trial but keeps activation owner-only and deployment-gated", async () => {
+    const caller = appRouter.createCaller(createAuthenticatedContext());
+    await expect(caller.schedulerTrial.saveDraft({ organizationId: 8, cadenceMinutes: 15, staleAfterMinutes: 45 })).rejects.toMatchObject<Partial<TRPCError>>({ code: "FORBIDDEN" });
+
+    database.getOrganizationMembership.mockResolvedValue({ organizationId: 8, userId: 17, role: "manager" });
+    const status = await caller.schedulerTrial.status({ organizationId: 8 });
+    const draft = await caller.schedulerTrial.saveDraft({ organizationId: 8, cadenceMinutes: 30, staleAfterMinutes: 90 });
+    expect(status).toMatchObject({ deploymentReady: false, callbackPath: "/api/scheduled/monitoring", cadenceOptions: [15, 30, 60, 360, 1440] });
+    expect(draft).toMatchObject({ schedulerTrialStatus: "draft", scheduleCronExpression: "0 */15 * * * *" });
+    expect(database.saveSchedulerTrialDraft).toHaveBeenCalledWith(expect.objectContaining({ organizationId: 8, expectedIntervalMinutes: 30, staleAfterMinutes: 90, cronExpression: "0 */30 * * * *", userId: 17 }));
+    await expect(caller.schedulerTrial.activate({ organizationId: 8 })).rejects.toMatchObject<Partial<TRPCError>>({ code: "FORBIDDEN" });
+
+    database.getOrganizationMembership.mockResolvedValue({ organizationId: 8, userId: 17, role: "owner" });
+    database.getSchedulerTrialConfig.mockResolvedValue({ organizationId: 8, scheduleCronTaskUid: null, scheduleCronExpression: "0 */15 * * * *", schedulerTrialStatus: "draft", expectedIntervalMinutes: 15, staleAfterMinutes: 45 });
+    await expect(caller.schedulerTrial.activate({ organizationId: 8 })).rejects.toMatchObject<Partial<TRPCError>>({ code: "PRECONDITION_FAILED", message: "Publish the application and verify its deployed health endpoint before activating a scheduler trial." });
+  });
+
+  it("returns application health, readiness, monitoring, and scheduler evidence only to tenant governance roles", async () => {
+    const caller = appRouter.createCaller(createAuthenticatedContext());
+    await expect(caller.administration.applicationStatus({ organizationId: 8 })).rejects.toMatchObject<Partial<TRPCError>>({ code: "FORBIDDEN" });
+
+    database.getOrganizationMembership.mockResolvedValue({ organizationId: 8, userId: 17, role: "manager" });
+    const status = await caller.administration.applicationStatus({ organizationId: 8 });
+    expect(status).toMatchObject({
+      readinessStatus: 200,
+      readiness: { ok: true, dependencies: { database: "configured", scheduler: "not_activated_in_this_environment" } },
+      monitoringHealth: { state: "not_enabled" },
+      viewerRole: "manager",
+      deploymentReady: false,
+    });
+    expect(status.telemetry.requestCorrelation).toContain("x-request-id");
   });
 
   it("keeps in-app alert escalation policy and evaluation behind governance roles while exposing tenant evidence", async () => {

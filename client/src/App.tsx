@@ -15,6 +15,7 @@ const IntelligenceWorkspace = lazy(() => import("./pages/IntelligenceWorkspace")
 const ActionsWorkspace = lazy(() => import("./pages/ActionsWorkspace"));
 const ReportsWorkspace = lazy(() => import("./pages/ReportsWorkspace"));
 const ScenarioWorkspace = lazy(() => import("./pages/ScenarioWorkspace"));
+const AdministrationWorkspace = lazy(() => import("./pages/AdministrationWorkspace"));
 
 function RouteLoading() {
   return <div className="app-loading-state">Loading workspace…</div>;
@@ -38,6 +39,7 @@ function Router() {
       <Route path={"/app/actions"}><ProtectedWorkspace><ActionsWorkspace /></ProtectedWorkspace></Route>
       <Route path={"/app/reports"}><ProtectedWorkspace><ReportsWorkspace /></ProtectedWorkspace></Route>
       <Route path={"/app/readiness"}><ProtectedWorkspace><ImplementationDashboard /></ProtectedWorkspace></Route>
+      <Route path={"/app/administration"}><ProtectedWorkspace><AdministrationWorkspace /></ProtectedWorkspace></Route>
       <Route path={"/404"} component={NotFound} />
       {/* Final fallback route */}
       <Route component={NotFound} />

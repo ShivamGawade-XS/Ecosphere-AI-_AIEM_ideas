@@ -33,6 +33,72 @@ img { display: block; max-width: 100%; }
 .skip-link { position: fixed; left: 14px; top: 12px; z-index: 100; transform: translateY(-160%); background: var(--ink); color: var(--paper); padding: 10px 14px; font-size: .75rem; font-weight: 800; text-decoration: none; transition: transform .16s var(--ease-out); }
 .skip-link:focus-visible { transform: translateY(0); }
 
+.access-governance header { align-items: flex-start; }
+.access-governance__rules { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; margin: 5px 0 18px; color: var(--moss); font-size: .72rem; font-weight: 800; }
+.access-governance__rules > span { display: inline-flex; align-items: center; gap: 6px; padding: 7px 9px; border: 1px solid var(--hairline); background: rgba(200,242,91,.14); }
+.role-help { display: inline-grid; place-items: center; width: 28px; height: 28px; border: 1px solid var(--hairline); background: transparent; color: var(--moss); border-radius: 50%; }
+.role-help:hover { background: var(--acid); color: var(--ink); }
+.member-admin-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.member-admin-card { border: 1px solid var(--hairline); padding: 15px; background: rgba(255,255,255,.22); }
+.member-admin-card header { display: grid; grid-template-columns: 34px minmax(0,1fr) auto; gap: 9px; align-items: center; }
+.member-avatar { width: 34px; height: 34px; display: grid; place-items: center; border: 1px solid var(--moss); border-radius: 50%; color: var(--moss); font-weight: 900; font-size: .8rem; }
+.member-admin-card h3 { margin: 0; font-size: .92rem; }
+.member-admin-card header > div > span { display: block; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #637064; font-size: .67rem; }
+.role-badge { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; padding: 5px 7px; border-radius: 999px; font-size: .63rem; font-weight: 900; letter-spacing: .04em; text-transform: uppercase; outline-offset: 2px; }
+.role-badge--owner { background: var(--ink); color: var(--acid); }
+.role-badge--manager { background: #dcecd1; color: var(--moss); }
+.role-badge--operator { background: #e6e2d5; color: #49564b; }
+.role-badge--viewer { background: #eee9dc; color: #6b766c; }
+.member-admin-card__meta { display: flex; justify-content: space-between; gap: 8px; margin: 13px 0; padding-top: 11px; border-top: 1px solid var(--hairline); color: #637064; font-size: .66rem; }
+.owner-guard { display: inline-flex; align-items: center; gap: 4px; color: #8c462d; font-weight: 800; }
+.member-admin-card__control label { display: grid; gap: 5px; color: var(--moss); font-size: .66rem; font-weight: 900; text-transform: uppercase; letter-spacing: .05em; }
+.member-admin-card__control select { width: 100%; min-height: 35px; padding: 7px; border: 1px solid var(--hairline); background: var(--paper); color: var(--ink); }
+.owner-safe-action, .member-readonly { display: flex; align-items: flex-start; gap: 7px; min-height: 38px; color: #5b675d; font-size: .7rem; }
+.owner-safe-action { color: #80422c; }
+.owner-safe-action > div { display: grid; gap: 2px; flex: 1; }
+.owner-safe-action b { font-size: .71rem; }
+.owner-safe-action span { line-height: 1.35; }
+.member-readonly span { line-height: 1.4; }
+
+.administration-page .workspace-header { margin-bottom: 24px; }
+.admin-health-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border: 1px solid var(--hairline); margin-bottom: 18px; }
+.admin-status-card { min-height: 150px; padding: 17px; display: grid; align-content: start; gap: 8px; border-right: 1px solid var(--hairline); background: rgba(255,255,255,.22); }
+.admin-status-card:last-child { border-right: 0; }
+.admin-status-card > svg { color: var(--moss); }
+.admin-status-card > span { color: var(--moss); font-size: .62rem; font-weight: 900; letter-spacing: .1em; }
+.admin-status-card strong { font-family: Georgia, serif; font-size: 1.42rem; color: var(--ink); text-transform: capitalize; }
+.admin-status-card small { color: #637064; font-size: .72rem; line-height: 1.4; }
+.admin-grid { display: grid; grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr); gap: 18px; }
+.admin-health-panel, .scheduler-trial-panel { display: grid; gap: 15px; align-content: start; }
+.admin-checks { display: grid; gap: 0; border: 1px solid var(--hairline); }
+.admin-checks > div { display: grid; grid-template-columns: 22px minmax(0,1fr) auto; gap: 8px; align-items: center; padding: 11px; border-bottom: 1px solid var(--hairline); font-size: .76rem; }
+.admin-checks > div:last-child { border-bottom: 0; }
+.admin-checks svg { color: var(--moss); }
+.admin-checks b { color: var(--moss); font-size: .67rem; text-transform: capitalize; }
+.scheduler-form { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.scheduler-form label { display: grid; gap: 6px; color: var(--moss); font-size: .67rem; font-weight: 900; letter-spacing: .04em; text-transform: uppercase; }
+.scheduler-form select, .scheduler-form input { min-height: 39px; padding: 8px; border: 1px solid var(--hairline); background: var(--paper); color: var(--ink); }
+.scheduler-form small { color: #637064; font-size: .66rem; font-weight: 500; line-height: 1.4; letter-spacing: 0; text-transform: none; }
+.scheduler-state { display: flex; gap: 8px; align-items: flex-start; padding: 12px; background: rgba(200,242,91,.13); border-left: 3px solid var(--acid); }
+.scheduler-state svg { color: var(--moss); flex: 0 0 auto; }
+.scheduler-state div { display: grid; gap: 3px; }
+.scheduler-state b { font-size: .76rem; }
+.scheduler-state span { color: #637064; font-size: .7rem; overflow-wrap: anywhere; }
+.scheduler-trial-panel .workspace-actions { display: flex; flex-wrap: wrap; gap: 9px; align-items: center; }
+.scheduler-trial-panel .workspace-actions button { min-height: 38px; padding: 9px 12px; }
+.scheduler-trial-panel .workspace-actions .secondary-action { background: transparent; border: 1px solid var(--moss); color: var(--moss); }
+.scheduler-trial-panel .workspace-actions .secondary-action:disabled { opacity: .55; }
+.admin-guard { display: flex; align-items: flex-start; gap: 7px; margin: 0; color: #80422c; font-size: .72rem; line-height: 1.45; }
+.admin-guard svg { flex: 0 0 auto; margin-top: 2px; }
+
+@media (max-width: 720px) {
+  .member-admin-grid { grid-template-columns: 1fr; }
+  .member-admin-card__meta { flex-direction: column; }
+  .admin-health-grid, .admin-grid, .scheduler-form { grid-template-columns: 1fr; }
+  .admin-status-card { min-height: auto; border-right: 0; border-bottom: 1px solid var(--hairline); }
+  .admin-status-card:last-child { border-bottom: 0; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; transition-duration: .01ms !important; }
 }

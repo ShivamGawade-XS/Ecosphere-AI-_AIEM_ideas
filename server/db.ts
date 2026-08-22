@@ -926,6 +926,90 @@ export async function upsertMonitoringServiceTarget(input: {
   return getMonitoringOperationalHealth(input.organizationId);
 }
 
+export async function getSchedulerTrialConfig(organizationId: number) {
+  const database = await requireDb();
+  const [target] = await database.select().from(monitoringServiceTargets)
+    .where(and(eq(monitoringServiceTargets.organizationId, organizationId), eq(monitoringServiceTargets.targetKey, "scheduled-monitoring"))).limit(1);
+  return target ?? null;
+}
+
+export async function saveSchedulerTrialDraft(input: {
+  organizationId: number;
+  expectedIntervalMinutes: number;
+  staleAfterMinutes: number;
+  cronExpression: string;
+  userId: number;
+}) {
+  const database = await requireDb();
+  await database.insert(monitoringServiceTargets).values({
+    organizationId: input.organizationId,
+    targetKey: "scheduled-monitoring",
+    expectedIntervalMinutes: input.expectedIntervalMinutes,
+    staleAfterMinutes: input.staleAfterMinutes,
+    isEnabled: false,
+    scheduleCronExpression: input.cronExpression,
+    schedulerTrialStatus: "draft",
+    schedulerTrialLastRequestedAt: new Date(),
+    schedulerTrialLastError: null,
+    schedulerTrialUpdatedByUserId: input.userId,
+    createdByUserId: input.userId,
+  }).onDuplicateKeyUpdate({
+    set: {
+      expectedIntervalMinutes: input.expectedIntervalMinutes,
+      staleAfterMinutes: input.staleAfterMinutes,
+      isEnabled: false,
+      scheduleCronExpression: input.cronExpression,
+      schedulerTrialStatus: "draft",
+      schedulerTrialLastRequestedAt: new Date(),
+      schedulerTrialLastError: null,
+      schedulerTrialUpdatedByUserId: input.userId,
+      createdByUserId: input.userId,
+      updatedAt: new Date(),
+    },
+  });
+  await database.insert(auditEvents).values({ organizationId: input.organizationId, actorUserId: input.userId, eventType: "scheduler.trial_drafted", resourceType: "monitoring_service_target", resourceId: "scheduled-monitoring", payload: { expectedIntervalMinutes: input.expectedIntervalMinutes, staleAfterMinutes: input.staleAfterMinutes, cronExpression: input.cronExpression } });
+  return getSchedulerTrialConfig(input.organizationId);
+}
+
+export async function activateSchedulerTrial(input: { organizationId: number; userId: number; taskUid: string; cronExpression: string; nextExecutionAt?: string | null }) {
+  const database = await requireDb();
+  await database.update(monitoringServiceTargets).set({
+    scheduleCronTaskUid: input.taskUid,
+    scheduleCronExpression: input.cronExpression,
+    schedulerTrialStatus: "active",
+    schedulerTrialLastRequestedAt: new Date(),
+    schedulerTrialLastError: null,
+    schedulerTrialUpdatedByUserId: input.userId,
+    isEnabled: true,
+    updatedAt: new Date(),
+  }).where(and(eq(monitoringServiceTargets.organizationId, input.organizationId), eq(monitoringServiceTargets.targetKey, "scheduled-monitoring")));
+  await database.insert(auditEvents).values({ organizationId: input.organizationId, actorUserId: input.userId, eventType: "scheduler.trial_activated", resourceType: "monitoring_service_target", resourceId: "scheduled-monitoring", payload: { taskUid: input.taskUid, cronExpression: input.cronExpression, nextExecutionAt: input.nextExecutionAt ?? null } });
+  return getSchedulerTrialConfig(input.organizationId);
+}
+
+export async function pauseSchedulerTrial(input: { organizationId: number; userId: number; nextExecutionAt?: string | null }) {
+  const database = await requireDb();
+  await database.update(monitoringServiceTargets).set({ schedulerTrialStatus: "paused", schedulerTrialLastRequestedAt: new Date(), schedulerTrialLastError: null, schedulerTrialUpdatedByUserId: input.userId, isEnabled: false, updatedAt: new Date() })
+    .where(and(eq(monitoringServiceTargets.organizationId, input.organizationId), eq(monitoringServiceTargets.targetKey, "scheduled-monitoring")));
+  await database.insert(auditEvents).values({ organizationId: input.organizationId, actorUserId: input.userId, eventType: "scheduler.trial_paused", resourceType: "monitoring_service_target", resourceId: "scheduled-monitoring", payload: { nextExecutionAt: input.nextExecutionAt ?? null } });
+  return getSchedulerTrialConfig(input.organizationId);
+}
+
+export async function recordSchedulerTrialActivationFailure(input: { organizationId: number; userId: number; errorCode: string }) {
+  const database = await requireDb();
+  await database.update(monitoringServiceTargets).set({ schedulerTrialStatus: "activation_failed", schedulerTrialLastRequestedAt: new Date(), schedulerTrialLastError: input.errorCode.slice(0, 500), schedulerTrialUpdatedByUserId: input.userId, isEnabled: false, updatedAt: new Date() })
+    .where(and(eq(monitoringServiceTargets.organizationId, input.organizationId), eq(monitoringServiceTargets.targetKey, "scheduled-monitoring")));
+  await database.insert(auditEvents).values({ organizationId: input.organizationId, actorUserId: input.userId, eventType: "scheduler.trial_activation_failed", resourceType: "monitoring_service_target", resourceId: "scheduled-monitoring", payload: { errorCode: input.errorCode.slice(0, 120) } });
+  return getSchedulerTrialConfig(input.organizationId);
+}
+
+export async function getOrganizationIdForScheduleTaskUid(taskUid: string) {
+  const database = await requireDb();
+  const [target] = await database.select({ organizationId: monitoringServiceTargets.organizationId }).from(monitoringServiceTargets)
+    .where(eq(monitoringServiceTargets.scheduleCronTaskUid, taskUid)).limit(1);
+  return target?.organizationId ?? null;
+}
+
 export async function getMonitoringOperationalHealth(organizationId: number, now = new Date()) {
   const database = await requireDb();
   const [targetRows, latestScheduledRun, openRecoveries] = await Promise.all([

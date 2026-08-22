@@ -164,3 +164,11 @@
 - [x] Add Intelligence UI tests for pending, triggered-with-action, suppressed, and resolved escalation evidence states.
 - [x] Add direct recovery persistence tests for open → retrying → resolved and retrying → failed/reopened transitions.
 - [x] Add a focused regression proving a successful matching rerun resolves only its own recovery event.
+
+## Administration Experience Enhancements
+
+- [x] Enhance tenant member-role administration with clear role indicators, owner-safety explanations, and contextual tooltips.
+- [x] Build a manager/owner authenticated scheduler-trial workflow that prepares a deployment-gated platform schedule without enabling recurrence in the development environment.
+- [x] Add a dedicated administration dashboard for application liveness, readiness dependencies, scheduler-trial status, and safe next actions.
+- [x] Add deterministic API, workspace, route-entry, and accessibility tests for the enhanced administration surfaces.
+- [x] Verify responsive desktop/mobile administration UX, update operational documentation, and run the complete quality gate.

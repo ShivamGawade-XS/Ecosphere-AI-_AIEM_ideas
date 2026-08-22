@@ -27,6 +27,7 @@ export const alertStatuses = ["open", "acknowledged", "resolved"] as const;
 export const monitoringRunTriggers = ["manual", "scheduled", "cli"] as const;
 export const monitoringRunStatuses = ["running", "completed", "failed", "skipped"] as const;
 export const monitoringRecoveryStatuses = ["open", "retrying", "resolved"] as const;
+export const schedulerTrialStatuses = ["draft", "active", "paused", "activation_failed"] as const;
 export const alertDeliveryChannels = ["owner_notification"] as const;
 export const alertDeliveryStatuses = ["queued", "delivered", "failed", "suppressed"] as const;
 export const alertEscalationStatuses = ["pending", "triggered", "suppressed", "resolved"] as const;
@@ -516,11 +517,17 @@ export const monitoringServiceTargets = mysqlTable(
     expectedIntervalMinutes: int("expectedIntervalMinutes").notNull().default(15),
     staleAfterMinutes: int("staleAfterMinutes").notNull().default(45),
     isEnabled: boolean("isEnabled").notNull().default(false),
+    scheduleCronTaskUid: varchar("scheduleCronTaskUid", { length: 65 }),
+    scheduleCronExpression: varchar("scheduleCronExpression", { length: 64 }),
+    schedulerTrialStatus: mysqlEnum("schedulerTrialStatus", schedulerTrialStatuses).notNull().default("draft"),
+    schedulerTrialLastRequestedAt: timestamp("schedulerTrialLastRequestedAt"),
+    schedulerTrialLastError: varchar("schedulerTrialLastError", { length: 500 }),
+    schedulerTrialUpdatedByUserId: int("schedulerTrialUpdatedByUserId").references(() => users.id, { onDelete: "set null" }),
     createdByUserId: int("createdByUserId").references(() => users.id, { onDelete: "set null" }),
     createdAt: timestamp("createdAt").defaultNow().notNull(),
     updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
   },
-  (table) => [uniqueIndex("monitoring_targets_org_key_unique").on(table.organizationId, table.targetKey)],
+  (table) => [uniqueIndex("monitoring_targets_org_key_unique").on(table.organizationId, table.targetKey), uniqueIndex("monitoring_targets_task_uid_unique").on(table.scheduleCronTaskUid)],
 );
 
 /** A durable incident/recovery record for failed or stale monitoring work. */

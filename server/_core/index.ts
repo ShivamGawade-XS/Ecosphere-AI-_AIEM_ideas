@@ -9,8 +9,8 @@ import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { sdk } from "./sdk";
 import { serveStatic, setupVite } from "./vite";
-import { runMonitoringForAllOrganizations } from "../workers/monitoringWorker";
-import { getDb } from "../db";
+import { runMonitoringForOrganization } from "../workers/monitoringWorker";
+import { getDb, getOrganizationIdForScheduleTaskUid } from "../db";
 import { createLivenessPayload, createReadinessResponse } from "./health";
 import { operationalRequestTelemetry } from "./observability";
 
@@ -62,16 +62,18 @@ async function startServer() {
       if (!user.isCron || !user.taskUid) {
         return res.status(403).json({ ok: false, error: "cron-only" });
       }
+      const organizationId = await getOrganizationIdForScheduleTaskUid(user.taskUid);
+      if (!organizationId) return res.json({ ok: true, taskUid: user.taskUid, skipped: "orphan" });
       const minuteBucket = Math.floor(Date.now() / 60_000);
-      const results = await runMonitoringForAllOrganizations({
+      const result = await runMonitoringForOrganization({
+        organizationId,
         runKey: `scheduled:${user.taskUid}:${minuteBucket}`,
         trigger: "scheduled",
       });
-      const failed = results.filter((result) => result.status === "failed");
-      if (failed.length) {
-        return res.status(500).json({ ok: false, taskUid: user.taskUid, failedCount: failed.length, results });
+      if (result.status === "failed") {
+        return res.status(500).json({ ok: false, taskUid: user.taskUid, organizationId, result });
       }
-      return res.json({ ok: true, taskUid: user.taskUid, results });
+      return res.json({ ok: true, taskUid: user.taskUid, organizationId, result });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown scheduled monitoring error";
       return res.status(500).json({

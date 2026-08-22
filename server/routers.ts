@@ -1,5 +1,6 @@
 import { TRPCError } from "@trpc/server";
 import { createHash } from "node:crypto";
+import { parse as parseCookie } from "cookie";
 import { z } from "zod";
 import { actionPriorities, actionStatuses, anomalySeverities, organizationRoles, readingSources, resourceTypes } from "../drizzle/schema";
 import * as db from "./db";
@@ -11,9 +12,19 @@ import { calculateScenario, SCENARIO_CALCULATION_VERSION } from "./domain/scenar
 import { runMonitoringForOrganization } from "./workers/monitoringWorker";
 import { previewCsvImport, MAX_CSV_BYTES } from "./domain/csvImport";
 import { storagePut } from "./storage";
+import { createHeartbeatJob, updateHeartbeatJob } from "./_core/heartbeat";
+import { createLivenessPayload, createReadinessResponse } from "./_core/health";
 
 const mutableRoles = ["owner", "manager", "operator"] as const;
 const governanceRoles = ["owner", "manager"] as const;
+const schedulerCadenceMinutes = [15, 30, 60, 360, 1440] as const;
+const schedulerCronByCadence: Record<(typeof schedulerCadenceMinutes)[number], string> = { 15: "0 */15 * * * *", 30: "0 */30 * * * *", 60: "0 0 * * * *", 360: "0 0 */6 * * *", 1440: "0 0 2 * * *" };
+
+function requireAuthenticatedSchedulerSession(cookieHeader: string | undefined) {
+  const session = parseCookie(cookieHeader ?? "")[COOKIE_NAME];
+  if (!session) throw new TRPCError({ code: "UNAUTHORIZED", message: "Sign in again before configuring an authenticated scheduler trial." });
+  return session;
+}
 const scenarioAssumptionsSchema = z.object({
   baselineEnergyKwh: z.number().finite().nonnegative().max(999_999_999),
   baselineWaterM3: z.number().finite().nonnegative().max(999_999_999),
@@ -354,6 +365,78 @@ export const appRouter = router({
         if (!recovery.started) return { recovery, run: null };
         const run = await runMonitoringForOrganization({ organizationId: input.organizationId, runKey, trigger: "manual" });
         return { recovery, run };
+      }),
+  }),
+
+  schedulerTrial: router({
+    status: protectedProcedure
+      .input(z.object({ organizationId: z.number().int().positive() }))
+      .query(async ({ ctx, input }) => {
+        await requireOrganizationRole(ctx.user.id, input.organizationId, governanceRoles);
+        return { configuration: await db.getSchedulerTrialConfig(input.organizationId), deploymentReady: process.env.NODE_ENV === "production", callbackPath: "/api/scheduled/monitoring", cadenceOptions: schedulerCadenceMinutes };
+      }),
+    saveDraft: protectedProcedure
+      .input(z.object({ organizationId: z.number().int().positive(), cadenceMinutes: z.union([z.literal(15), z.literal(30), z.literal(60), z.literal(360), z.literal(1440)]), staleAfterMinutes: z.number().int().min(15).max(7 * 24 * 60) }).refine((input) => input.staleAfterMinutes >= input.cadenceMinutes, { path: ["staleAfterMinutes"], message: "Stale threshold must be at least the selected cadence." }))
+      .mutation(async ({ ctx, input }) => {
+        await requireOrganizationRole(ctx.user.id, input.organizationId, governanceRoles);
+        const current = await db.getSchedulerTrialConfig(input.organizationId);
+        if (current?.schedulerTrialStatus === "active") throw new TRPCError({ code: "CONFLICT", message: "Pause the active schedule before replacing its trial plan." });
+        return db.saveSchedulerTrialDraft({ organizationId: input.organizationId, expectedIntervalMinutes: input.cadenceMinutes, staleAfterMinutes: input.staleAfterMinutes, cronExpression: schedulerCronByCadence[input.cadenceMinutes], userId: ctx.user.id });
+      }),
+    activate: protectedProcedure
+      .input(z.object({ organizationId: z.number().int().positive() }))
+      .mutation(async ({ ctx, input }) => {
+        await requireOrganizationRole(ctx.user.id, input.organizationId, ["owner"]);
+        const current = await db.getSchedulerTrialConfig(input.organizationId);
+        if (!current?.scheduleCronExpression) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Save a scheduler trial plan before activation." });
+        if (process.env.NODE_ENV !== "production") throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Publish the application and verify its deployed health endpoint before activating a scheduler trial." });
+        const session = requireAuthenticatedSchedulerSession(ctx.req.headers.cookie);
+        try {
+          const result = current.scheduleCronTaskUid
+            ? await updateHeartbeatJob(current.scheduleCronTaskUid, { cron: current.scheduleCronExpression, path: "/api/scheduled/monitoring", method: "POST", payload: { organizationId: input.organizationId }, description: `EcoSphere monitored trial for tenant ${input.organizationId}`, enable: true }, session)
+            : await createHeartbeatJob({ name: `ecosphere-monitoring-${input.organizationId}`, cron: current.scheduleCronExpression, path: "/api/scheduled/monitoring", method: "POST", payload: { organizationId: input.organizationId }, description: `EcoSphere monitored trial for tenant ${input.organizationId}` }, session);
+          const taskUid = current.scheduleCronTaskUid ?? ("taskUid" in result && typeof result.taskUid === "string" ? result.taskUid : null);
+          if (!taskUid) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Scheduler service did not return a task identifier." });
+          const nextExecutionAt = typeof result.nextExecutionAt === "string" ? result.nextExecutionAt : null;
+          return db.activateSchedulerTrial({ organizationId: input.organizationId, userId: ctx.user.id, taskUid, cronExpression: current.scheduleCronExpression, nextExecutionAt });
+        } catch (error) {
+          await db.recordSchedulerTrialActivationFailure({ organizationId: input.organizationId, userId: ctx.user.id, errorCode: error instanceof TRPCError ? error.code : "scheduler_service_error" });
+          throw error;
+        }
+      }),
+    pause: protectedProcedure
+      .input(z.object({ organizationId: z.number().int().positive() }))
+      .mutation(async ({ ctx, input }) => {
+        await requireOrganizationRole(ctx.user.id, input.organizationId, ["owner"]);
+        const current = await db.getSchedulerTrialConfig(input.organizationId);
+        if (!current?.scheduleCronTaskUid) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "No activated scheduler trial exists for this tenant." });
+        if (process.env.NODE_ENV !== "production") throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Scheduler lifecycle actions are available only from the deployed application." });
+        const result = await updateHeartbeatJob(current.scheduleCronTaskUid, { enable: false }, requireAuthenticatedSchedulerSession(ctx.req.headers.cookie));
+        return db.pauseSchedulerTrial({ organizationId: input.organizationId, userId: ctx.user.id, nextExecutionAt: result.nextExecutionAt });
+      }),
+  }),
+
+  administration: router({
+    applicationStatus: protectedProcedure
+      .input(z.object({ organizationId: z.number().int().positive() }))
+      .query(async ({ ctx, input }) => {
+        const membership = await requireOrganizationRole(ctx.user.id, input.organizationId, governanceRoles);
+        const databaseAvailable = Boolean(await db.getDb());
+        const readiness = createReadinessResponse(databaseAvailable);
+        const [schedulerTrial, monitoringHealth] = await Promise.all([
+          db.getSchedulerTrialConfig(input.organizationId),
+          db.getMonitoringOperationalHealth(input.organizationId),
+        ]);
+        return {
+          liveness: createLivenessPayload(),
+          readiness: readiness.body,
+          readinessStatus: readiness.status,
+          schedulerTrial,
+          monitoringHealth,
+          viewerRole: membership.role,
+          deploymentReady: process.env.NODE_ENV === "production",
+          telemetry: { requestCorrelation: "Responses include x-request-id; request completion logs exclude request bodies, headers, query strings, and raw errors." },
+        };
       }),
   }),
 

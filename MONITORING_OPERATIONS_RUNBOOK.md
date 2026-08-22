@@ -9,12 +9,14 @@ EcoSphere monitoring is **browser-independent**. The deterministic worker is exe
 ## Scheduler activation after deployment
 
 1. Publish a tested checkpoint and confirm the production service starts successfully.
-2. Create a platform schedule that calls `POST /api/scheduled/monitoring` with the platform scheduler identity. The callback rejects callers that are not authenticated as cron work.
-3. Configure an initial 15-minute cadence only if the monitored data volume supports it. Each callback must use a unique time-bucketed run key.
-4. In **Intelligence → Scheduled worker health**, save the same expected interval and a conservative stale threshold, such as 45 minutes for a 15-minute schedule.
-5. Verify a scheduled run appears in `monitoring_runs` with `trigger = scheduled`, then verify the health state becomes `healthy`.
+2. Open **Administration → Authenticated scheduler trial** as a manager or owner. Save a tenant-scoped trial plan with the required cadence and stale-after threshold. Saving the plan does **not** create a schedule.
+3. Open the deployed `/healthz` and `/readyz` endpoints from the Administration workspace. Confirm that liveness is healthy and the database is configured.
+4. A tenant **owner** can then activate the trial. The application creates or resumes only the task UID bound to that tenant’s persisted monitoring target; the callback rejects normal user traffic and resolves the tenant from the platform task UID, never from callback request data.
+5. Configure an initial 15-minute cadence only if the monitored data volume supports it. Each callback uses a task-UID and UTC-minute-bucket run key.
+6. Verify a scheduled run appears in `monitoring_runs` with `trigger = scheduled`, then verify the Administration and Intelligence health state becomes `healthy`.
+7. If the run is not healthy, pause the trial from Administration, inspect recovery evidence, remediate, and repeat one controlled trial before enabling reliance on recurrence.
 
-The scheduler must not be activated solely by toggling the in-app health target. That toggle records expected service behavior for stale-run detection; it does not create external infrastructure.
+The scheduler must not be activated solely by toggling the in-app health target or saving a trial plan. These actions record expected behavior and prepare a safe activation request; only the deployed owner-controlled activation creates external infrastructure.
 
 ## Idempotency and recovery
 

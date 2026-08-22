@@ -21,7 +21,7 @@ import {
 } from "@/components/ui/sidebar";
 import { startLogin } from "@/const";
 import { useIsMobile } from "@/hooks/useMobile";
-import { BrainCircuit, Building2, Calculator, ClipboardCheck, FileText, FileUp, House, LayoutDashboard, LogOut, PanelLeft, Radar } from "lucide-react";
+import { BrainCircuit, Building2, Calculator, ClipboardCheck, FileText, FileUp, House, LayoutDashboard, LogOut, PanelLeft, Radar, Settings2 } from "lucide-react";
 import React, { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { DashboardLayoutSkeleton } from './DashboardLayoutSkeleton';
@@ -37,6 +37,7 @@ const menuItems = [
   { icon: ClipboardCheck, label: "Actions", path: "/app/actions" },
   { icon: FileText, label: "Reports", path: "/app/reports" },
   { icon: Radar, label: "Readiness", path: "/app/readiness" },
+  { icon: Settings2, label: "Administration", path: "/app/administration" },
   { icon: House, label: "Public narrative", path: "/narrative" },
 ];
 

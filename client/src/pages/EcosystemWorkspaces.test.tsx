@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const testApi = vi.hoisted(() => ({
   organizationsMine: vi.fn(), organizationMembers: vi.fn(), overview: vi.fn(), recentReadings: vi.fn(), actionList: vi.fn(), actionCollaboration: vi.fn(), siteList: vi.fn(), meterList: vi.fn(),
-  intelligenceReadiness: vi.fn(), monitoringOverview: vi.fn(), monitoringStatus: vi.fn(), monitoringHealth: vi.fn(), alertRouting: vi.fn(), deliveryAttempts: vi.fn(), escalationPolicy: vi.fn(), escalations: vi.fn(), forecastList: vi.fn(), recommendationList: vi.fn(), comparisonList: vi.fn(), reportsSummary: vi.fn(), reportSnapshots: vi.fn(), scenarioList: vi.fn(), invalidate: vi.fn().mockResolvedValue(undefined),
+  intelligenceReadiness: vi.fn(), monitoringOverview: vi.fn(), monitoringStatus: vi.fn(), monitoringHealth: vi.fn(), administrationStatus: vi.fn(), schedulerTrialStatus: vi.fn(), alertRouting: vi.fn(), deliveryAttempts: vi.fn(), escalationPolicy: vi.fn(), escalations: vi.fn(), forecastList: vi.fn(), recommendationList: vi.fn(), comparisonList: vi.fn(), reportsSummary: vi.fn(), reportSnapshots: vi.fn(), scenarioList: vi.fn(), invalidate: vi.fn().mockResolvedValue(undefined),
   actionCreateMode: "success" as "success" | "error", scenarioPreviewMode: "success" as "success" | "error", scenarioSaveMode: "success" as "success" | "error",
   scenarioPreviewData: undefined as unknown,
 }));
@@ -14,7 +14,7 @@ vi.mock("@/lib/trpc", () => ({
   trpc: {
     useUtils: () => ({
       organizations: { mine: { invalidate: testApi.invalidate }, members: { invalidate: testApi.invalidate } }, sites: { list: { invalidate: testApi.invalidate } }, meters: { list: { invalidate: testApi.invalidate } },
-      actions: { list: { invalidate: testApi.invalidate }, collaboration: { invalidate: testApi.invalidate } }, scenarios: { list: { invalidate: testApi.invalidate } }, comparisons: { list: { invalidate: testApi.invalidate } }, forecasts: { list: { invalidate: testApi.invalidate } }, recommendations: { list: { invalidate: testApi.invalidate } }, reports: { snapshots: { invalidate: testApi.invalidate } }, analytics: { overview: { invalidate: testApi.invalidate } }, monitoring: { status: { invalidate: testApi.invalidate }, health: { invalidate: testApi.invalidate } }, alertRouting: { get: { invalidate: testApi.invalidate }, deliveries: { invalidate: testApi.invalidate } }, alertEscalation: { get: { invalidate: testApi.invalidate }, list: { invalidate: testApi.invalidate } }, intelligence: { readiness: { invalidate: testApi.invalidate } },
+      actions: { list: { invalidate: testApi.invalidate }, collaboration: { invalidate: testApi.invalidate } }, scenarios: { list: { invalidate: testApi.invalidate } }, comparisons: { list: { invalidate: testApi.invalidate } }, forecasts: { list: { invalidate: testApi.invalidate } }, recommendations: { list: { invalidate: testApi.invalidate } }, reports: { snapshots: { invalidate: testApi.invalidate } }, analytics: { overview: { invalidate: testApi.invalidate } }, monitoring: { status: { invalidate: testApi.invalidate }, health: { invalidate: testApi.invalidate } }, schedulerTrial: { status: { invalidate: testApi.invalidate } }, administration: { applicationStatus: { invalidate: testApi.invalidate } }, alertRouting: { get: { invalidate: testApi.invalidate }, deliveries: { invalidate: testApi.invalidate } }, alertEscalation: { get: { invalidate: testApi.invalidate }, list: { invalidate: testApi.invalidate } }, intelligence: { readiness: { invalidate: testApi.invalidate } },
     }),
     organizations: { mine: { useQuery: () => testApi.organizationsMine() }, members: { useQuery: () => testApi.organizationMembers() }, create: { useMutation: () => ({ isPending: false, mutate: vi.fn() }) }, updateMemberRole: { useMutation: () => ({ isPending: false, mutate: vi.fn() }) } },
     operations: { overview: { useQuery: () => testApi.overview() } },
@@ -23,6 +23,8 @@ vi.mock("@/lib/trpc", () => ({
     meters: { list: { useQuery: () => testApi.meterList() }, create: { useMutation: () => ({ isPending: false, mutate: vi.fn() }) } },
     intelligence: { readiness: { useQuery: () => testApi.intelligenceReadiness() } },
     monitoring: { status: { useQuery: () => testApi.monitoringStatus() }, health: { useQuery: () => testApi.monitoringHealth() }, runOnce: { useMutation: () => ({ isPending: false, mutate: vi.fn(), data: undefined, error: null }) }, configureTarget: { useMutation: () => ({ isPending: false, mutate: vi.fn(), error: null }) }, retryRecovery: { useMutation: () => ({ isPending: false, mutate: vi.fn(), error: null }) } },
+    schedulerTrial: { status: { useQuery: () => testApi.schedulerTrialStatus() }, saveDraft: { useMutation: () => ({ isPending: false, mutate: vi.fn() }) }, activate: { useMutation: () => ({ isPending: false, mutate: vi.fn() }) }, pause: { useMutation: () => ({ isPending: false, mutate: vi.fn() }) } },
+    administration: { applicationStatus: { useQuery: () => testApi.administrationStatus() } },
     alertRouting: { get: { useQuery: () => testApi.alertRouting() }, deliveries: { useQuery: () => testApi.deliveryAttempts() }, update: { useMutation: () => ({ isPending: false, mutate: vi.fn(), error: null }) } },
     alertEscalation: { get: { useQuery: () => testApi.escalationPolicy() }, list: { useQuery: () => testApi.escalations() }, update: { useMutation: () => ({ isPending: false, mutate: vi.fn(), error: null }) }, evaluateNow: { useMutation: () => ({ isPending: false, mutate: vi.fn(), error: null }) } },
     forecasts: { list: { useQuery: () => testApi.forecastList() }, generate: { useMutation: () => ({ isPending: false, mutate: vi.fn(), data: undefined, error: null }) } },
@@ -42,6 +44,7 @@ import IntelligenceWorkspace from "./IntelligenceWorkspace";
 import ActionsWorkspace from "./ActionsWorkspace";
 import ReportsWorkspace from "./ReportsWorkspace";
 import ScenarioWorkspace from "./ScenarioWorkspace";
+import AdministrationWorkspace from "./AdministrationWorkspace";
 
 const query = (data: unknown) => ({ data, isLoading: false, isFetching: false, error: null });
 const tenant = [{ organization: { id: 1, name: "AIEM Campus Pilot" }, membership: { role: "owner" } }];
@@ -60,6 +63,8 @@ describe("authenticated ecosystem workspaces", () => {
     testApi.monitoringStatus.mockReturnValue(query({ latestRun: null, latestScore: null, openAlertCount: 0 }));
     testApi.monitoringOverview.mockReturnValue(query({ status: { latestRun: null, latestScore: null, openAlertCount: 0 }, alerts: [], anomalies: [], qualityFindings: [], qualityWarnings: 0, qualityFailures: 0, carbonTotals: { totalKgCo2e: 0, calculationCount: 0, factorLabel: "pilot" } }));
     testApi.monitoringHealth.mockReturnValue(query({ state: "not_enabled", target: null, latestScheduledRun: null, openRecoveries: [], ageMinutes: null }));
+    testApi.schedulerTrialStatus.mockReturnValue(query({ configuration: { schedulerTrialStatus: "draft", scheduleCronExpression: "0 */15 * * * *", expectedIntervalMinutes: 15, staleAfterMinutes: 45 }, deploymentReady: false, callbackPath: "/api/scheduled/monitoring", cadenceOptions: [15, 30, 60, 360, 1440] }));
+    testApi.administrationStatus.mockReturnValue(query({ liveness: { ok: true }, readiness: { ok: true, dependencies: { database: "configured", scheduler: "not_activated_in_this_environment" } }, readinessStatus: 200, schedulerTrial: { schedulerTrialStatus: "draft", scheduleCronExpression: "0 */15 * * * *" }, monitoringHealth: { state: "not_enabled", latestScheduledRun: null }, viewerRole: "owner", deploymentReady: false, telemetry: { requestCorrelation: "Responses include x-request-id; request completion logs exclude request bodies, headers, query strings, and raw errors." } }));
     testApi.alertRouting.mockReturnValue(query(null));
     testApi.deliveryAttempts.mockReturnValue(query([]));
     testApi.escalationPolicy.mockReturnValue(query(null));
@@ -131,12 +136,28 @@ describe("authenticated ecosystem workspaces", () => {
     expect(screen.getByRole("button", { name: "Calculate on server" })).toBeTruthy();
   });
 
-  it("shows owner-only role controls for existing tenant members without representing invitations as delivered", () => {
+  it("shows protected health and readiness evidence while keeping scheduler activation disabled until deployed", () => {
+    render(<AdministrationWorkspace />);
+
+    expect(screen.getByRole("heading", { name: "Operate from verified service evidence." })).toBeTruthy();
+    expect(screen.getByText("LIVENESS")).toBeTruthy();
+    expect(screen.getByText("READINESS")).toBeTruthy();
+    expect(screen.getByLabelText("Scheduler trial cadence")).toBeTruthy();
+    expect(screen.getByLabelText("Scheduler stale-after threshold")).toBeTruthy();
+    expect((screen.getByRole("button", { name: "Activate trial" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText(/Publish the application, then verify deployed/)).toBeTruthy();
+  });
+
+  it("shows owner-safe role indicators and prevents a final owner from being demoted in the interface", () => {
     render(<RegistryWorkspace />);
 
     expect(screen.getByRole("region", { name: "Tenant access administration" })).toBeTruthy();
     expect(screen.getByText("AIEM Owner")).toBeTruthy();
-    expect((screen.getByLabelText("Role for AIEM Owner") as HTMLSelectElement).value).toBe("owner");
+    expect(screen.getByText("Final owner protected")).toBeTruthy();
+    expect(screen.getByText("Role locked for safety")).toBeTruthy();
+    expect(screen.queryByLabelText("Role for AIEM Owner")).toBeNull();
+    expect(screen.getAllByText("Owner").length).toBeGreaterThan(0);
+    expect(screen.getByRole("button", { name: "Learn about owner safety" })).toBeTruthy();
     expect(screen.getByText(/Invitation delivery is not configured in this deployment\./)).toBeTruthy();
   });
 

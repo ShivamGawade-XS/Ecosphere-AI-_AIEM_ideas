@@ -25,6 +25,7 @@ vi.mock("./pages/IntelligenceWorkspace", () => ({ default: () => <h1>INTELLIGENC
 vi.mock("./pages/ActionsWorkspace", () => ({ default: () => <h1>ACTIONS WORKSPACE</h1> }));
 vi.mock("./pages/ReportsWorkspace", () => ({ default: () => <h1>REPORTS WORKSPACE</h1> }));
 vi.mock("./pages/ScenarioWorkspace", () => ({ default: () => <h1>SCENARIOS WORKSPACE</h1> }));
+vi.mock("./pages/AdministrationWorkspace", () => ({ default: () => <h1>ADMINISTRATION WORKSPACE</h1> }));
 
 afterEach(() => cleanup());
 
@@ -46,5 +47,12 @@ describe("EcoSphere application entry routes", () => {
 
     expect(await screen.findByRole("heading", { name: "PUBLIC NARRATIVE WORKSPACE" })).toBeTruthy();
     expect(screen.queryByTestId("operations-shell")).toBeNull();
+  });
+
+  it("opens the protected administration dashboard at its dedicated route", async () => {
+    renderAt("/app/administration");
+
+    expect(await screen.findByRole("heading", { name: "ADMINISTRATION WORKSPACE" })).toBeTruthy();
+    expect(screen.getByTestId("operations-shell")).toBeTruthy();
   });
 });
