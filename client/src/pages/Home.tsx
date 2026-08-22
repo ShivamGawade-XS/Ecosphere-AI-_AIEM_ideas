@@ -26,19 +26,19 @@ import {
 import EcoSphereMark from "@/components/EcoSphereMark";
 
 const stages = [
-  { id: "monitor", label: "Monitor", title: "Start with a trusted reading.", copy: "Energy, water, and waste measurements are persisted with source and simulated-data provenance.", icon: Activity, proof: "Persistent measurements" },
-  { id: "detect", label: "Detect", title: "Make unusual movement visible.", copy: "Baseline deviation becomes a marked operational event, not an overlooked line item.", icon: Radar, proof: "Anomaly → alert" },
-  { id: "predict", label: "Predict", title: "Read the short-term direction.", copy: "A deterministic baseline forecast surfaces directional risk with visible assumptions.", icon: CircleGauge, proof: "Bounded forecast" },
-  { id: "simulate", label: "Simulate", title: "Test the intervention before the budget.", copy: "Transparent scenario inputs compare modeled resource, carbon, savings, ROI, and payback outcomes.", icon: Calculator, proof: "Traceable scenario" },
-  { id: "recommend", label: "Recommend", title: "Give the team a practical next move.", copy: "Recommendations cite detected evidence. AI explains the recommendation but never creates the numbers.", icon: ShieldCheck, proof: "Evidence-linked action" },
+  { id: "monitor", label: "Monitor", title: "Start with a trusted reading.", copy: "The implemented platform foundation persists authenticated meter readings with source, unit, and provenance evidence.", icon: Activity, proof: "Registry + ingestion" },
+  { id: "detect", label: "Detect", title: "Make unusual movement visible.", copy: "The next monitoring service will turn validated baseline deviation into an operational event and alert.", icon: Radar, proof: "Planned: anomaly → alert" },
+  { id: "predict", label: "Predict", title: "Read the short-term direction.", copy: "The planned analytics service will provide a bounded forecast with visible assumptions and factor versions.", icon: CircleGauge, proof: "Planned: bounded forecast" },
+  { id: "simulate", label: "Simulate", title: "Test the intervention before the budget.", copy: "The public prototype shows transparent modeled inputs; a server-authoritative scenario service is tracked in the readiness workspace.", icon: Calculator, proof: "Prototype scenario" },
+  { id: "recommend", label: "Recommend", title: "Give the team a practical next move.", copy: "The planned recommendation service will cite recorded evidence. AI explanations must never create environmental numbers.", icon: ShieldCheck, proof: "Planned: evidence-linked action" },
   { id: "act", label: "Act", title: "Close the gap in the real campus.", copy: "The pilot focuses attention on a small set of high-value resource streams and interventions.", icon: Zap, proof: "Pilot-ready scope" },
-  { id: "measure", label: "Measure", title: "Return to the same baseline.", copy: "The operational loop is designed to compare modeled action with later measured evidence.", icon: Activity, proof: "Measure-after-action" },
+  { id: "measure", label: "Measure", title: "Return to the same baseline.", copy: "The operational loop is designed to compare modeled action with later measured evidence once a monitoring worker is deployed.", icon: Activity, proof: "Measurement-after-action" },
 ];
 
 const evidence = [
-  { label: "DATA LINEAGE", value: "SIMULATED", note: "AIEM Campus fixture. Each demo reading carries provenance.", icon: Database },
-  { label: "NUMERICAL AUTHORITY", value: "ENGINE", note: "EcoScore, carbon, forecasts, and ROI remain deterministic.", icon: Calculator },
-  { label: "AI BOUNDARY", value: "EXPLAINS", note: "Local demo fallback frames evidence and actions; it does not invent them.", icon: ShieldCheck },
+  { label: "DATA LINEAGE", value: "SIMULATED", note: "AIEM Campus fixture. The new data foundation records source, unit, and provenance for live inputs.", icon: Database },
+  { label: "NUMERICAL AUTHORITY", value: "ENGINE", note: "The prototype calculations are deterministic; authoritative server calculations remain tracked work.", icon: Calculator },
+  { label: "AI BOUNDARY", value: "CONSTRAINED", note: "Planned AI explanations will frame recorded evidence and will not invent environmental numbers.", icon: ShieldCheck },
 ];
 
 const interventions = [
@@ -215,7 +215,7 @@ export default function Home() {
             <div><span>ENGINE</span><b>TRACEABLE</b></div>
             <div><span>NEXT STEP</span><b>REVIEW HVAC</b></div>
           </div>
-          <div className="dossier-ticker"><span className="ticker-pulse" /> WORKER INDEPENDENT FROM BROWSER</div>
+          <div className="dossier-ticker"><span className="ticker-pulse" /> TARGET: WORKER INDEPENDENT FROM BROWSER</div>
         </div>
       </section>
 
@@ -243,7 +243,7 @@ export default function Home() {
             <span className="eyebrow">THE CLOSED LOOP</span>
             <h2>One signal. A more useful decision.</h2>
           </div>
-          <p>EcoSphere treats sustainability management as an observable operating loop, not a static reporting exercise.</p>
+          <p>EcoSphere treats sustainability management as an observable operating loop, not a static reporting exercise. The readiness workspace marks each production capability honestly.</p>
         </div>
 
         <div className="process-tape" role="tablist" aria-label="EcoSphere sustainability loop">
@@ -372,7 +372,7 @@ export default function Home() {
         <div className="interventions-copy">
           <span className="eyebrow">INTERVENTION QUEUE</span>
           <h2>Compare the action, not the slogans.</h2>
-          <p>For the AIEM pilot, intervention cards are ranked as a decision-support view. Any live explanation remains downstream of the same transparent assumptions and recorded evidence.</p>
+          <p>For the AIEM pilot, intervention cards are ranked as a decision-support view. The current browser model is illustrative; production actions require server-authoritative calculations and recorded evidence.</p>
           <img src="/manus-storage/ecosphere-scenario-table_022e21f9.jpg" alt="Field-journal workspace for an intervention scenario review" />
         </div>
         <div className="intervention-list">
@@ -407,14 +407,15 @@ export default function Home() {
             <h2>A credible prototype knows where its evidence ends.</h2>
           </div>
           <div className="pilot-notes">
-            <p><Check size={17}/> Today’s demo uses deterministic simulated readings and a traceable calculation engine.</p>
-            <p><Check size={17}/> It is not presented as a certified reporting system, live Odoo integration, production tenant system, or guarantee of savings.</p>
-            <p><Check size={17}/> The next campus phase replaces assumptions with verified meters, factors, identity controls, and measurement-after-action.</p>
+            <p><Check size={17}/> Today’s public demo uses deterministic simulated readings and a transparent browser-side calculation model.</p>
+            <p><Check size={17}/> The protected platform foundation now adds identity, tenant registry, audit events, and validated meter-reading ingestion.</p>
+            <p><Check size={17}/> It is not yet presented as a certified reporting system, live Odoo integration, monitored production tenant system, or guarantee of savings.</p>
+            <p><Check size={17}/> The next campus phase adds verified meters, factors, durable analytics workers, alerts, and measurement-after-action.</p>
           </div>
         </div>
         <div className="closing-statement">
           <EcoSphereMark inverse compact />
-          <p>“EcoSphere AI persists resource data, detects meaningful change, models interventions, and explains the next action—without asking a language model to invent environmental numbers.”</p>
+          <p>“EcoSphere AI now secures the path to persisted resource data; its next services detect change, run server-side scenarios, and explain the next action—without asking a language model to invent environmental numbers.”</p>
         </div>
       </section>
 
