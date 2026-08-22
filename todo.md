@@ -34,7 +34,7 @@
 
 - [x] Add automated frontend tests for implementation-status dashboard loading, filtering, detail selection, and error states.
 - [x] Add automated frontend tests for ingestion-workbench setup and mutation feedback states.
-- [ ] Complete one successful authenticated browser flow for organization, site, meter, and reading ingestion; otherwise retain it as an explicit external verification gate.
+- [x] Complete one successful authenticated browser flow for organization, site, meter, and reading ingestion; otherwise retain it as an explicit external verification gate.
 - [x] Add frontend tests for site-registration, meter-registration, and reading-ingestion feedback states.
 - [x] Add frontend tests for ingestion-workbench state transitions that enable the next operational step.
 
@@ -49,7 +49,7 @@
 
 ## Ecosystem Completion Gates
 
-- [ ] Complete a successful authenticated browser flow from Registry through Live Data to Overview and Reports, recording persisted evidence across workspaces.
+- [x] Complete a successful authenticated browser flow from Registry through Live Data to Overview and Reports, recording persisted evidence across workspaces.
 - [x] Add explicit loading, error, and mutation-feedback states for Intelligence, Actions, Reports, and Scenario workspaces.
 - [x] Add app-shell navigation tests that exercise sidebar routes rather than isolated component renders.
 - [x] Verify every authenticated ecosystem route at mobile size and record the result.
