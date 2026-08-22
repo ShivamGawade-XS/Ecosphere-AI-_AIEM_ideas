@@ -104,4 +104,19 @@ describe("IngestionWorkbench", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Ingest reading" }));
     expect(await screen.findByText("This reading was already accepted; duplicate data was not created.")).toBeTruthy();
   });
+
+  it("persists controlled pilot fixtures with an explicit simulated source and provenance label", async () => {
+    queryMocks.organizationsMine.mockReturnValue({ data: [{ organization: { id: 8 } }], isLoading: false, error: null });
+    queryMocks.sitesList.mockReturnValue({ data: [{ id: 13, name: "AIEM Main Campus" }], isLoading: false, error: null });
+    queryMocks.metersList.mockReturnValue({ data: [{ id: 44, displayName: "HVAC Electricity", canonicalUnit: "kWh" }], isLoading: false, error: null });
+    let submitted: Record<string, unknown> | undefined;
+    mutationMocks.ingestReading.mockImplementation((options: { onSuccess?: (payload: unknown) => void }) => ({ isPending: false, mutate: (input: Record<string, unknown>) => { submitted = input; options.onSuccess?.({ reading: { id: 100 }, idempotent: false }); } }));
+    render(<IngestionWorkbench />);
+
+    fireEvent.change(await screen.findByLabelText("Reading source"), { target: { value: "simulated" } });
+    fireEvent.click(screen.getByRole("button", { name: "Ingest reading" }));
+
+    expect(submitted).toMatchObject({ source: "simulated", provenance: { simulated: true, label: "AIEM pilot verification fixture — simulated" } });
+    expect(await screen.findByText("Simulated pilot reading accepted and visibly labeled in provenance.")).toBeTruthy();
+  });
 });

@@ -68,3 +68,32 @@
 - [x] Add automated route-entry tests proving `/` renders Operations Overview and `/narrative` renders the public narrative.
 - [x] Re-run the full suite and record the passing entry-route evidence.
 - [x] Confirm the persisted route-entry verification record and rerun the final quality gate after documentation changes.
+
+## Current Gap Inventory
+
+- [x] Audit remaining product, data, intelligence, security, operations, and deployment gaps after the authenticated ecosystem expansion.
+- [x] Define the remaining production backlog with acceptance criteria and implementation sequencing.
+- [x] Deliver the updated detailed gap inventory to the user.
+
+## Gap Inventory Confirmation
+
+- [x] Confirm the refreshed gap-inventory document is persisted with the current product-state assessment and backlog.
+- [x] Re-run a project quality check after documenting the current gaps.
+- [x] Deliver the confirmed current-gap inventory to the user.
+
+## Gap Inventory Delivery Confirmation
+
+- [x] Deliver the current implemented-versus-missing capability inventory and prioritized build sequence to the user.
+
+## Monitoring and Analytics Foundation
+
+- [x] Define the deterministic data-quality, anomaly, carbon, EcoScore, and worker data contract.
+- [x] Add database records and migrations for quality findings, anomaly events, carbon calculations, EcoScore snapshots, and monitoring runs.
+- [x] Implement tenant-safe persistence helpers, deterministic analytics services, and browser-independent monitoring worker code.
+- [x] Add protected analytics, worker-control, and status APIs plus a production-ready API/worker specification.
+- [x] Add ecosystem monitoring controls and truthful intelligence/score/alert views.
+- [x] Add and run monitoring pipeline, API, worker, and route verification tests.
+- [x] Extend and validate the reusable production-migration skill for this monitoring pattern.
+- [x] Align monitoring eligibility with the documented future-timestamp baseline exclusion and explicit unprocessed-reading selection.
+- [x] Reconcile the documented analytics API contract with the implemented router, including EcoScore history and carbon totals.
+- [x] Add an explicitly labeled simulated-pilot reading source for controlled anomaly verification without misrepresenting campus data.

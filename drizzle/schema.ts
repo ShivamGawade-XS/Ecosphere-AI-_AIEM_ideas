@@ -20,6 +20,12 @@ export const qualityStatuses = ["accepted", "flagged", "rejected"] as const;
 export const actionStatuses = ["proposed", "in_progress", "completed", "archived"] as const;
 export const actionPriorities = ["low", "medium", "high", "critical"] as const;
 export const scenarioStatuses = ["draft", "saved", "archived"] as const;
+export const qualityFindingStatuses = ["passed", "warning", "failed"] as const;
+export const anomalySeverities = ["low", "medium", "high", "critical"] as const;
+export const anomalyStatuses = ["open", "acknowledged", "resolved"] as const;
+export const alertStatuses = ["open", "acknowledged", "resolved"] as const;
+export const monitoringRunTriggers = ["manual", "scheduled", "cli"] as const;
+export const monitoringRunStatuses = ["running", "completed", "failed", "skipped"] as const;
 
 export type ScenarioAssumptions = {
   baselineEnergyKwh: number;
@@ -235,6 +241,144 @@ export const sustainabilityScenarios = mysqlTable(
   ],
 );
 
+/** Deterministic quality-rule outcomes for a persisted source reading. */
+export const dataQualityFindings = mysqlTable(
+  "data_quality_findings",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    organizationId: int("organizationId").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    meterId: int("meterId").notNull().references(() => meters.id, { onDelete: "cascade" }),
+    readingId: int("readingId").notNull().references(() => sustainabilityReadings.id, { onDelete: "cascade" }),
+    ruleId: varchar("ruleId", { length: 96 }).notNull(),
+    status: mysqlEnum("status", qualityFindingStatuses).notNull(),
+    message: varchar("message", { length: 320 }).notNull(),
+    details: json("details"),
+    evaluationVersion: varchar("evaluationVersion", { length: 32 }).notNull(),
+    evaluatedAt: timestamp("evaluatedAt").defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("quality_findings_reading_rule_version_unique").on(table.readingId, table.ruleId, table.evaluationVersion),
+    index("quality_findings_org_evaluated_idx").on(table.organizationId, table.evaluatedAt),
+    index("quality_findings_meter_idx").on(table.meterId),
+  ],
+);
+
+/** Carbon output derived from a source reading and a versioned pilot factor. */
+export const carbonCalculations = mysqlTable(
+  "carbon_calculations",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    organizationId: int("organizationId").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    meterId: int("meterId").notNull().references(() => meters.id, { onDelete: "cascade" }),
+    readingId: int("readingId").notNull().references(() => sustainabilityReadings.id, { onDelete: "cascade" }),
+    emittedKgCo2e: decimal("emittedKgCo2e", { precision: 16, scale: 4 }).notNull(),
+    emissionFactor: decimal("emissionFactor", { precision: 16, scale: 6 }).notNull(),
+    factorVersion: varchar("factorVersion", { length: 48 }).notNull(),
+    calculationVersion: varchar("calculationVersion", { length: 32 }).notNull(),
+    computedAt: timestamp("computedAt").defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("carbon_calculations_reading_version_unique").on(table.readingId, table.calculationVersion),
+    index("carbon_calculations_org_computed_idx").on(table.organizationId, table.computedAt),
+    index("carbon_calculations_meter_idx").on(table.meterId),
+  ],
+);
+
+/** Persisted evidence of a statistically unusual but quality-accepted reading. */
+export const anomalyEvents = mysqlTable(
+  "anomaly_events",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    organizationId: int("organizationId").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    siteId: int("siteId").notNull().references(() => sites.id, { onDelete: "cascade" }),
+    meterId: int("meterId").notNull().references(() => meters.id, { onDelete: "cascade" }),
+    readingId: int("readingId").notNull().references(() => sustainabilityReadings.id, { onDelete: "cascade" }),
+    detectorVersion: varchar("detectorVersion", { length: 32 }).notNull(),
+    severity: mysqlEnum("severity", anomalySeverities).notNull(),
+    status: mysqlEnum("status", anomalyStatuses).notNull().default("open"),
+    baselineMean: decimal("baselineMean", { precision: 16, scale: 4 }).notNull(),
+    baselineStdDev: decimal("baselineStdDev", { precision: 16, scale: 4 }).notNull(),
+    observedValue: decimal("observedValue", { precision: 16, scale: 4 }).notNull(),
+    zScore: decimal("zScore", { precision: 12, scale: 4 }).notNull(),
+    evidence: json("evidence"),
+    detectedAt: timestamp("detectedAt").defaultNow().notNull(),
+    acknowledgedAt: timestamp("acknowledgedAt"),
+    resolvedAt: timestamp("resolvedAt"),
+  },
+  (table) => [
+    uniqueIndex("anomaly_events_reading_detector_unique").on(table.readingId, table.detectorVersion),
+    index("anomaly_events_org_status_idx").on(table.organizationId, table.status),
+    index("anomaly_events_meter_detected_idx").on(table.meterId, table.detectedAt),
+  ],
+);
+
+/** Actionable alert generated from a persisted anomaly event. */
+export const monitoringAlerts = mysqlTable(
+  "monitoring_alerts",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    organizationId: int("organizationId").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    anomalyId: int("anomalyId").notNull().references(() => anomalyEvents.id, { onDelete: "cascade" }),
+    severity: mysqlEnum("severity", anomalySeverities).notNull(),
+    status: mysqlEnum("status", alertStatuses).notNull().default("open"),
+    title: varchar("title", { length: 180 }).notNull(),
+    message: text("message").notNull(),
+    acknowledgedByUserId: int("acknowledgedByUserId").references(() => users.id, { onDelete: "set null" }),
+    acknowledgedAt: timestamp("acknowledgedAt"),
+    resolvedAt: timestamp("resolvedAt"),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("monitoring_alerts_anomaly_unique").on(table.anomalyId),
+    index("monitoring_alerts_org_status_idx").on(table.organizationId, table.status),
+  ],
+);
+
+/** Transparent 0–100 operational score derived from persisted monitoring evidence. */
+export const ecoScoreSnapshots = mysqlTable(
+  "eco_score_snapshots",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    organizationId: int("organizationId").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    siteId: int("siteId").references(() => sites.id, { onDelete: "set null" }),
+    score: int("score").notNull(),
+    components: json("components").notNull(),
+    calculationVersion: varchar("calculationVersion", { length: 32 }).notNull(),
+    windowStart: timestamp("windowStart"),
+    windowEnd: timestamp("windowEnd"),
+    computedAt: timestamp("computedAt").defaultNow().notNull(),
+  },
+  (table) => [
+    index("eco_scores_org_computed_idx").on(table.organizationId, table.computedAt),
+    index("eco_scores_site_computed_idx").on(table.siteId, table.computedAt),
+  ],
+);
+
+/** Durable, idempotent execution record for an organization’s monitoring cycle. */
+export const monitoringRuns = mysqlTable(
+  "monitoring_runs",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    organizationId: int("organizationId").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    runKey: varchar("runKey", { length: 160 }).notNull(),
+    trigger: mysqlEnum("trigger", monitoringRunTriggers).notNull(),
+    status: mysqlEnum("status", monitoringRunStatuses).notNull().default("running"),
+    readingsScanned: int("readingsScanned").notNull().default(0),
+    qualityFindingsCreated: int("qualityFindingsCreated").notNull().default(0),
+    anomaliesCreated: int("anomaliesCreated").notNull().default(0),
+    alertsCreated: int("alertsCreated").notNull().default(0),
+    ecoScoresUpdated: int("ecoScoresUpdated").notNull().default(0),
+    summary: json("summary"),
+    errorSummary: text("errorSummary"),
+    startedAt: timestamp("startedAt").defaultNow().notNull(),
+    completedAt: timestamp("completedAt"),
+  },
+  (table) => [
+    uniqueIndex("monitoring_runs_org_key_unique").on(table.organizationId, table.runKey),
+    index("monitoring_runs_org_started_idx").on(table.organizationId, table.startedAt),
+  ],
+);
+
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
 export type Organization = typeof organizations.$inferSelect;
@@ -243,3 +387,9 @@ export type Meter = typeof meters.$inferSelect;
 export type SustainabilityReading = typeof sustainabilityReadings.$inferSelect;
 export type SustainabilityAction = typeof sustainabilityActions.$inferSelect;
 export type SustainabilityScenario = typeof sustainabilityScenarios.$inferSelect;
+export type DataQualityFinding = typeof dataQualityFindings.$inferSelect;
+export type CarbonCalculation = typeof carbonCalculations.$inferSelect;
+export type AnomalyEvent = typeof anomalyEvents.$inferSelect;
+export type MonitoringAlert = typeof monitoringAlerts.$inferSelect;
+export type EcoScoreSnapshot = typeof ecoScoreSnapshots.$inferSelect;
+export type MonitoringRun = typeof monitoringRuns.$inferSelect;

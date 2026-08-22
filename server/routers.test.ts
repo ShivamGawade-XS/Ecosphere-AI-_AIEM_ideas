@@ -11,9 +11,15 @@ const database = vi.hoisted(() => ({
   createSustainabilityAction: vi.fn(),
   getOperationsOverview: vi.fn(),
   createSustainabilityScenario: vi.fn(),
+  getMonitoringStatus: vi.fn(),
+  getMonitoringOverview: vi.fn(),
+  acknowledgeMonitoringAlert: vi.fn(),
 }));
 
 vi.mock("./db", () => database);
+
+const worker = vi.hoisted(() => ({ runMonitoringForOrganization: vi.fn() }));
+vi.mock("./workers/monitoringWorker", () => worker);
 
 import { appRouter } from "./routers";
 
@@ -46,6 +52,10 @@ describe("EcoSphere core API", () => {
     database.createSustainabilityAction.mockResolvedValue({ id: 71 });
     database.getOperationsOverview.mockResolvedValue({ siteCount: 1, meterCount: 1, readingCount: 0, actionCount: 0, activeActionCount: 0, latestReadingAt: null });
     database.createSustainabilityScenario.mockResolvedValue({ id: 84 });
+    database.getMonitoringStatus.mockResolvedValue({ latestRun: null, latestScore: null, openAlertCount: 0 });
+    database.getMonitoringOverview.mockResolvedValue({ status: { latestRun: null, latestScore: null, openAlertCount: 0 }, alerts: [], anomalies: [], qualityFindings: [], qualityWarnings: 0, qualityFailures: 0, carbonTotals: { totalKgCo2e: 0, calculationCount: 0 } });
+    database.acknowledgeMonitoringAlert.mockResolvedValue({ id: 55, status: "acknowledged" });
+    worker.runMonitoringForOrganization.mockResolvedValue({ organizationId: 8, runKey: "manual:test-run", status: "completed", readingsScanned: 1, qualityFindingsCreated: 4, anomaliesCreated: 0, alertsCreated: 0, ecoScoresUpdated: 1, latestEcoScore: 100 });
   });
 
   it("persists an authenticated reading with a server-owned user identifier", async () => {
@@ -124,12 +134,31 @@ describe("EcoSphere core API", () => {
     expect(database.createSustainabilityAction).toHaveBeenCalledWith(expect.objectContaining({ organizationId: 8, siteId: 13, userId: 17, priority: "high" }));
   });
 
-  it("keeps unimplemented analytics explicit in the intelligence readiness response", async () => {
+  it("reports actual deterministic monitoring readiness and keeps forecasts explicit as planned", async () => {
     const caller = appRouter.createCaller(createAuthenticatedContext());
     const result = await caller.intelligence.readiness({ organizationId: 8 });
 
-    expect(result.pipeline).toContainEqual(expect.objectContaining({ id: "analytics", state: "planned" }));
+    expect(result.pipeline).toContainEqual(expect.objectContaining({ id: "analytics", state: "waiting" }));
+    expect(result.pipeline).toContainEqual(expect.objectContaining({ id: "forecast", state: "planned" }));
     expect(result.pipeline).toContainEqual(expect.objectContaining({ id: "readings", state: "waiting", evidence: "0 persisted readings" }));
+  });
+
+  it("runs deterministic monitoring only after the caller passes organization role checks", async () => {
+    const caller = appRouter.createCaller(createAuthenticatedContext());
+    const result = await caller.monitoring.runOnce({ organizationId: 8, runKey: "manual:test-run" });
+
+    expect(result).toMatchObject({ status: "completed", latestEcoScore: 100 });
+    expect(worker.runMonitoringForOrganization).toHaveBeenCalledWith({ organizationId: 8, runKey: "manual:test-run", trigger: "manual" });
+  });
+
+  it("returns tenant-scoped monitoring overview evidence and records alert acknowledgement with the caller identity", async () => {
+    const caller = appRouter.createCaller(createAuthenticatedContext());
+    const overview = await caller.analytics.overview({ organizationId: 8 });
+    const acknowledgement = await caller.alerts.acknowledge({ organizationId: 8, alertId: 55 });
+
+    expect(overview.carbonTotals).toMatchObject({ totalKgCo2e: 0 });
+    expect(acknowledgement).toMatchObject({ id: 55, status: "acknowledged" });
+    expect(database.acknowledgeMonitoringAlert).toHaveBeenCalledWith({ organizationId: 8, alertId: 55, userId: 17 });
   });
 
   it("calculates a deterministic server-owned scenario preview", async () => {

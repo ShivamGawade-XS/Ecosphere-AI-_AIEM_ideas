@@ -7,6 +7,7 @@ import { systemRouter } from "./_core/systemRouter";
 import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
 import { COOKIE_NAME } from "../shared/const";
 import { calculateScenario, SCENARIO_CALCULATION_VERSION } from "./domain/scenarios";
+import { runMonitoringForOrganization } from "./workers/monitoringWorker";
 
 const mutableRoles = ["owner", "manager", "operator"] as const;
 const scenarioAssumptionsSchema = z.object({
@@ -37,7 +38,7 @@ const readinessItems = [
   { id: "registry", title: "Site and meter registry", status: "complete", area: "Data", evidence: "Tenant-scoped sites and meters define canonical resource units before ingest." },
   { id: "audit", title: "Audit evidence", status: "complete", area: "Governance", evidence: "Core creation and ingestion actions create append-only audit events." },
   { id: "scenarios", title: "Server-authoritative scenario engine", status: "in_progress", area: "Product", evidence: "Public prototype has transparent local modeling; authoritative persisted scenarios are next." },
-  { id: "analytics", title: "Monitoring, anomaly, and forecast worker", status: "planned", area: "Reliability", evidence: "Requires durable queue/worker, model versioning, retry, and alert lifecycle." },
+  { id: "analytics", title: "Monitoring, anomaly, carbon, and EcoScore worker", status: "in_progress", area: "Reliability", evidence: "Deterministic browser-independent worker, idempotent runs, quality checks, anomaly events, alerts, carbon calculations, and EcoScore snapshots are implemented; deployed scheduling remains a release task." },
   { id: "notifications", title: "Alert delivery and escalation", status: "planned", area: "Operations", evidence: "Requires notification preferences, event routing, delivery records, and incident ownership." },
   { id: "observability", title: "Production telemetry and service objectives", status: "planned", area: "Operations", evidence: "Requires structured logs, traces, metrics, dashboards, alerts, and recovery drills." },
   { id: "assurance", title: "Automated release quality gates", status: "in_progress", area: "Quality", evidence: "Core tests are being introduced; integration, E2E, accessibility, performance, and security gates remain." },
@@ -159,6 +160,66 @@ export const appRouter = router({
       }),
   }),
 
+  monitoring: router({
+    status: protectedProcedure
+      .input(z.object({ organizationId: z.number().int().positive() }))
+      .query(async ({ ctx, input }) => {
+        await requireOrganizationRole(ctx.user.id, input.organizationId);
+        return db.getMonitoringStatus(input.organizationId);
+      }),
+    runOnce: protectedProcedure
+      .input(z.object({ organizationId: z.number().int().positive(), runKey: z.string().trim().min(8).max(160).optional() }))
+      .mutation(async ({ ctx, input }) => {
+        await requireOrganizationRole(ctx.user.id, input.organizationId, mutableRoles);
+        const runKey = input.runKey ?? `manual:${input.organizationId}:${ctx.user.id}:${Date.now()}`;
+        return runMonitoringForOrganization({ organizationId: input.organizationId, runKey, trigger: "manual" });
+      }),
+  }),
+
+  analytics: router({
+    overview: protectedProcedure
+      .input(z.object({ organizationId: z.number().int().positive() }))
+      .query(async ({ ctx, input }) => {
+        await requireOrganizationRole(ctx.user.id, input.organizationId);
+        return db.getMonitoringOverview(input.organizationId);
+      }),
+    anomalies: protectedProcedure
+      .input(z.object({ organizationId: z.number().int().positive() }))
+      .query(async ({ ctx, input }) => {
+        await requireOrganizationRole(ctx.user.id, input.organizationId);
+        return db.listRecentAnomalies(input.organizationId);
+      }),
+    qualityFindings: protectedProcedure
+      .input(z.object({ organizationId: z.number().int().positive() }))
+      .query(async ({ ctx, input }) => {
+        await requireOrganizationRole(ctx.user.id, input.organizationId);
+        return db.listRecentQualityFindings(input.organizationId);
+      }),
+    ecoScoreHistory: protectedProcedure
+      .input(z.object({ organizationId: z.number().int().positive(), limit: z.number().int().min(1).max(100).optional() }))
+      .query(async ({ ctx, input }) => {
+        await requireOrganizationRole(ctx.user.id, input.organizationId);
+        return db.listEcoScoreHistory(input.organizationId, input.limit);
+      }),
+  }),
+
+  alerts: router({
+    list: protectedProcedure
+      .input(z.object({ organizationId: z.number().int().positive() }))
+      .query(async ({ ctx, input }) => {
+        await requireOrganizationRole(ctx.user.id, input.organizationId);
+        return db.listRecentMonitoringAlerts(input.organizationId);
+      }),
+    acknowledge: protectedProcedure
+      .input(z.object({ organizationId: z.number().int().positive(), alertId: z.number().int().positive() }))
+      .mutation(async ({ ctx, input }) => {
+        await requireOrganizationRole(ctx.user.id, input.organizationId, mutableRoles);
+        const result = await db.acknowledgeMonitoringAlert({ ...input, userId: ctx.user.id });
+        if (!result) throw new TRPCError({ code: "NOT_FOUND", message: "Alert not found in this organization." });
+        return result;
+      }),
+  }),
+
   actions: router({
     list: protectedProcedure
       .input(z.object({ organizationId: z.number().int().positive() }))
@@ -199,14 +260,18 @@ export const appRouter = router({
       .input(z.object({ organizationId: z.number().int().positive() }))
       .query(async ({ ctx, input }) => {
         await requireOrganizationRole(ctx.user.id, input.organizationId);
-        const overview = await db.getOperationsOverview(input.organizationId);
+        const [overview, monitoring] = await Promise.all([
+          db.getOperationsOverview(input.organizationId),
+          db.getMonitoringStatus(input.organizationId),
+        ]);
         return {
           overview,
           pipeline: [
             { id: "registry", label: "Meter registry", state: overview.meterCount > 0 ? "ready" : "blocked", evidence: `${overview.meterCount} registered meter${overview.meterCount === 1 ? "" : "s"}` },
             { id: "readings", label: "Validated readings", state: overview.readingCount > 0 ? "ready" : "waiting", evidence: `${overview.readingCount} persisted reading${overview.readingCount === 1 ? "" : "s"}` },
-            { id: "analytics", label: "Anomaly and forecast worker", state: "planned", evidence: "Requires durable scheduling, model versioning, and alert lifecycle." },
-            { id: "recommendations", label: "Evidence-linked recommendations", state: "planned", evidence: "Requires server analytics output before AI explanation is enabled." },
+            { id: "analytics", label: "Deterministic monitoring and anomaly pipeline", state: monitoring.latestRun ? "ready" : "waiting", evidence: monitoring.latestRun ? `Latest run: ${monitoring.latestRun.status}; ${monitoring.openAlertCount} open alert${monitoring.openAlertCount === 1 ? "" : "s"}.` : "Awaiting a manual or scheduled monitoring run." },
+            { id: "forecast", label: "Forecasting", state: "planned", evidence: "Forecasting is not yet implemented; the current EcoScore is not a forecast." },
+            { id: "recommendations", label: "Evidence-linked recommendations", state: "planned", evidence: "Recommendation explanations remain planned; no LLM is invoked by the monitoring worker." },
           ] as const,
         };
       }),

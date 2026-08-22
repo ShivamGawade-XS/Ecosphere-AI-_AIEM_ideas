@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const testApi = vi.hoisted(() => ({
   organizationsMine: vi.fn(), overview: vi.fn(), recentReadings: vi.fn(), actionList: vi.fn(), siteList: vi.fn(), meterList: vi.fn(),
-  intelligenceReadiness: vi.fn(), reportsSummary: vi.fn(), scenarioList: vi.fn(), invalidate: vi.fn().mockResolvedValue(undefined),
+  intelligenceReadiness: vi.fn(), monitoringOverview: vi.fn(), monitoringStatus: vi.fn(), reportsSummary: vi.fn(), scenarioList: vi.fn(), invalidate: vi.fn().mockResolvedValue(undefined),
   actionCreateMode: "success" as "success" | "error", scenarioPreviewMode: "success" as "success" | "error", scenarioSaveMode: "success" as "success" | "error",
   scenarioPreviewData: undefined as unknown,
 }));
@@ -14,7 +14,7 @@ vi.mock("@/lib/trpc", () => ({
   trpc: {
     useUtils: () => ({
       organizations: { mine: { invalidate: testApi.invalidate } }, sites: { list: { invalidate: testApi.invalidate } }, meters: { list: { invalidate: testApi.invalidate } },
-      actions: { list: { invalidate: testApi.invalidate } }, scenarios: { list: { invalidate: testApi.invalidate } },
+      actions: { list: { invalidate: testApi.invalidate } }, scenarios: { list: { invalidate: testApi.invalidate } }, analytics: { overview: { invalidate: testApi.invalidate } }, monitoring: { status: { invalidate: testApi.invalidate } }, intelligence: { readiness: { invalidate: testApi.invalidate } },
     }),
     organizations: { mine: { useQuery: () => testApi.organizationsMine() }, create: { useMutation: () => ({ isPending: false, mutate: vi.fn() }) } },
     operations: { overview: { useQuery: () => testApi.overview() } },
@@ -22,6 +22,9 @@ vi.mock("@/lib/trpc", () => ({
     sites: { list: { useQuery: () => testApi.siteList() }, create: { useMutation: () => ({ isPending: false, mutate: vi.fn() }) } },
     meters: { list: { useQuery: () => testApi.meterList() }, create: { useMutation: () => ({ isPending: false, mutate: vi.fn() }) } },
     intelligence: { readiness: { useQuery: () => testApi.intelligenceReadiness() } },
+    monitoring: { status: { useQuery: () => testApi.monitoringStatus() }, runOnce: { useMutation: () => ({ isPending: false, mutate: vi.fn(), data: undefined, error: null }) } },
+    analytics: { overview: { useQuery: () => testApi.monitoringOverview() } },
+    alerts: { acknowledge: { useMutation: () => ({ isPending: false, mutate: vi.fn() }) } },
     actions: { list: { useQuery: () => testApi.actionList() }, create: { useMutation: (options?: { onSuccess?: () => void; onError?: () => void }) => ({ isPending: false, mutate: () => testApi.actionCreateMode === "error" ? options?.onError?.() : options?.onSuccess?.() }) }, updateStatus: { useMutation: () => ({ isPending: false, mutate: vi.fn() }) } },
     reports: { summary: { useQuery: () => testApi.reportsSummary() } },
     scenarios: { list: { useQuery: () => testApi.scenarioList() }, preview: { useMutation: (options?: { onError?: () => void }) => ({ isPending: false, mutate: () => testApi.scenarioPreviewMode === "error" && options?.onError?.(), data: testApi.scenarioPreviewData }) }, save: { useMutation: (options?: { onSuccess?: () => void; onError?: () => void }) => ({ isPending: false, mutate: () => testApi.scenarioSaveMode === "error" ? options?.onError?.() : options?.onSuccess?.() }) } },
@@ -47,6 +50,8 @@ describe("authenticated ecosystem workspaces", () => {
     testApi.siteList.mockReturnValue(query([]));
     testApi.meterList.mockReturnValue(query([]));
     testApi.intelligenceReadiness.mockReturnValue(query({ overview: { meterCount: 2, readingCount: 3 }, pipeline: [{ id: "registry", label: "Meter registry", state: "ready", evidence: "2 registered meters" }, { id: "analytics", label: "Anomaly and forecast worker", state: "planned", evidence: "Requires durable scheduling." }] }));
+    testApi.monitoringStatus.mockReturnValue(query({ latestRun: null, latestScore: null, openAlertCount: 0 }));
+    testApi.monitoringOverview.mockReturnValue(query({ status: { latestRun: null, latestScore: null, openAlertCount: 0 }, alerts: [], anomalies: [], qualityFindings: [], qualityWarnings: 0, qualityFailures: 0, carbonTotals: { totalKgCo2e: 0, calculationCount: 0, factorLabel: "pilot" } }));
     testApi.reportsSummary.mockReturnValue(query({ overview: { siteCount: 1, meterCount: 2, readingCount: 3, actionCount: 1, activeActionCount: 1 }, recentBatches: [] }));
     testApi.scenarioList.mockReturnValue(query([]));
     testApi.actionCreateMode = "success"; testApi.scenarioPreviewMode = "success"; testApi.scenarioSaveMode = "success"; testApi.scenarioPreviewData = undefined;
@@ -88,7 +93,7 @@ describe("authenticated ecosystem workspaces", () => {
   it("makes protected query failures explicit rather than fabricating operational state", () => {
     testApi.intelligenceReadiness.mockReturnValue({ ...query(undefined), error: new Error("network") });
     render(<IntelligenceWorkspace />);
-    expect(screen.getByText("Intelligence status could not be loaded.")).toBeTruthy();
+    expect(screen.getByText("Monitoring evidence could not be loaded.")).toBeTruthy();
     cleanup();
     testApi.actionList.mockReturnValue({ ...query(undefined), error: new Error("network") });
     render(<ActionsWorkspace />);
@@ -106,7 +111,7 @@ describe("authenticated ecosystem workspaces", () => {
   it("covers loading and mutation feedback without concealing server outcomes", async () => {
     testApi.organizationsMine.mockReturnValue({ ...query(tenant), isLoading: true });
     render(<IntelligenceWorkspace />);
-    expect(screen.getByText("Loading evidence boundary…")).toBeTruthy();
+    expect(screen.getByText("Loading monitoring evidence…")).toBeTruthy();
     cleanup();
     render(<ReportsWorkspace />);
     expect(screen.getByText("Loading report boundary…")).toBeTruthy();

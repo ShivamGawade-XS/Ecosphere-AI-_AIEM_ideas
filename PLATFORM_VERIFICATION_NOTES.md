@@ -27,3 +27,39 @@ After the action transition, the Overview reflected **1 active action** alongsid
 The default root route was updated and verified to open the authenticated **Operations Overview** with all eight workspace links and live tenant evidence. The former landing experience is preserved at `/narrative`; both its header and hero expose explicit **Open workspace / Open mission control** links back to the complete product ecosystem.
 
 Automated entry-route coverage now verifies the same separation: `/` renders the protected Operations Overview inside the operations shell, while `/narrative` renders the standalone public Field Operations Ledger narrative. The final validation run completed with **7 test files and 25 tests passing**, clean TypeScript, and a successful production build.
+
+## Monitoring foundation verification
+
+At 06:11 on 22 August 2026, the authenticated AIEM Campus Pilot Overview rendered the persisted monitoring evidence from the browser-independent worker: **EcoScore 100**, latest run `completed`, and **0 open alerts**. The root workspace correctly directed the operator to Intelligence rather than claiming a staged worker.
+
+The authenticated Intelligence workspace rendered the actual operational contract: **pilot-carbon-v1 EcoScore**, **92.3 kgCO₂e** of pilot energy carbon, current quality count, alert lifecycle, anomaly evidence state, and a role-protected **Run monitoring now** control. It explicitly states that its control calls the same browser-independent worker used by the scheduler callback, and it keeps forecasting and AI-written recommendations labeled as planned. This confirms the interface is backed by persisted pilot evidence, but does not yet substitute for the planned simulated-spike end-to-end anomaly scenario recorded below.
+
+For the controlled verification sequence, the authenticated Live Data workspace selected the existing **HVAC Electricity · kWh** meter. The next intake values are simulated test evidence only and are not campus-source measurements.
+
+The Live Data interface was updated and reviewed in the authenticated browser to expose a **Simulated pilot test — explicitly labeled** source selector beside the target meter and reading value. Its in-product copy states that these readings must not be treated as campus-source data; the selected source persists `simulated` provenance for the verification fixture.
+
+The controlled browser fixture selected **HVAC Electricity · kWh** as its target and selected the explicit **simulated** source before any verification intake was submitted.
+
+At 06:15 on 22 August 2026, the browser submitted the first **100 kWh** controlled baseline reading. The product confirmed “Simulated pilot reading accepted and visibly labeled in provenance,” and the ingestion audit listed batch **#30001**, source **SIMULATED**, status `completed`, and `1 accepted`. This record is a test fixture, not a campus reading.
+
+The second controlled **101 kWh** simulated baseline was submitted through the same authenticated form; its asynchronous audit refresh is verified separately before it is used as anomaly evidence.
+
+The subsequent audit refresh did not yet display a second simulated batch, despite retaining the success notice. The browser console contained no client error. Treat the second baseline as unverified until the server-side ingestion outcome is independently confirmed; do not include it in final anomaly evidence until resolved.
+
+The controlled form-state diagnostic confirmed target meter `1`, source `simulated`, and an enabled **Ingest reading** button. The missing mutation is therefore not explained by an absent selection or a disabled UI control; it remains an active verification discrepancy.
+
+Browser replay identified that the preview overlay intercepted earlier low-viewport clicks; scrolling the form moves the ingest control into an interactive position. Subsequent verification clicks must use the current visible button index after scrolling rather than a stale element index.
+
+At 06:18 on 22 August 2026, the corrected visible ingest click submitted the second **101 kWh** simulated baseline. The audit listed batch **#60001**, source **SIMULATED**, status `completed`, and `1 accepted`. The fixture now contains the original manual reading plus two explicitly simulated baseline readings; one additional baseline and a high simulated spike will be added before the worker run.
+
+At 06:18:32 on 22 August 2026, the final **99 kWh** simulated baseline was accepted as batch **#60002**. The tenant now has four prior HVAC readings available for the rolling baseline: the original 112.5 kWh manually entered pilot fixture and the explicitly simulated 100, 101, and 99 kWh test values. The next value is a deliberately simulated high spike.
+
+At 06:18:56 on 22 August 2026, the controlled **250 kWh** high spike was accepted as simulated batch **#60003**. This is explicitly simulated verification evidence and must not be presented as an AIEM Campus source measurement. The browser ingestion sequence now contains three simulated baselines plus a clearly labeled simulated spike, ready for deterministic worker validation.
+
+At 06:19 on 22 August 2026, the authenticated Intelligence workspace initiated its role-protected manual monitoring run. The UI showed **Running deterministic checks…**, confirming the request entered the same server-owned worker path used by the scheduled callback.
+
+The completed run evaluated **4 newly unprocessed readings**, created **1 critical anomaly event**, and created **1 alert**. It persisted EcoScore **65**, pilot energy carbon **543.3 kgCO₂e**, and a critical HVAC evidence record showing **250.0000** observed against a **103.1250** rolling baseline with z-score **23.30**. These outputs derive solely from the controlled simulated fixture and the documented deterministic rules.
+
+The authorized user then acknowledged the critical alert in the same workspace. The alert and anomaly both displayed `acknowledged`, and the open-alert metric changed from **1** to **0**. A client-cache follow-up fix invalidates all status/readiness evidence after acknowledgement so the pipeline summary cannot retain a stale open-alert count.
+
+After a full browser reload, Intelligence still displayed EcoScore **65**, **0** open alerts, the acknowledged critical alert, and the z-score **23.30** anomaly evidence. The refreshed pipeline correctly reported “Latest run: completed; 0 open alerts,” confirming that persisted records—not browser state—drive the reviewed monitoring result.

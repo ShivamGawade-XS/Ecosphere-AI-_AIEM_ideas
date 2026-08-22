@@ -7,7 +7,9 @@ import { registerOAuthRoutes } from "./oauth";
 import { registerStorageProxy } from "./storageProxy";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
+import { sdk } from "./sdk";
 import { serveStatic, setupVite } from "./vite";
+import { runMonitoringForAllOrganizations } from "../workers/monitoringWorker";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -44,6 +46,32 @@ async function startServer() {
       createContext,
     })
   );
+  app.post("/api/scheduled/monitoring", async (req, res) => {
+    try {
+      const user = await sdk.authenticateRequest(req);
+      if (!user.isCron || !user.taskUid) {
+        return res.status(403).json({ ok: false, error: "cron-only" });
+      }
+      const minuteBucket = Math.floor(Date.now() / 60_000);
+      const results = await runMonitoringForAllOrganizations({
+        runKey: `scheduled:${user.taskUid}:${minuteBucket}`,
+        trigger: "scheduled",
+      });
+      const failed = results.filter((result) => result.status === "failed");
+      if (failed.length) {
+        return res.status(500).json({ ok: false, taskUid: user.taskUid, failedCount: failed.length, results });
+      }
+      return res.json({ ok: true, taskUid: user.taskUid, results });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown scheduled monitoring error";
+      return res.status(500).json({
+        ok: false,
+        error: message,
+        context: { path: "/api/scheduled/monitoring" },
+        timestamp: new Date().toISOString(),
+      });
+    }
+  });
   // development mode uses Vite, production mode uses static files
   if (process.env.NODE_ENV === "development") {
     await setupVite(app, server);

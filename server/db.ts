@@ -1,10 +1,16 @@
-import { and, count, desc, eq } from "drizzle-orm";
+import { and, count, desc, eq, isNull, sum } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import { nanoid } from "nanoid";
 import {
   auditEvents,
+  anomalyEvents,
+  carbonCalculations,
+  dataQualityFindings,
+  ecoScoreSnapshots,
   ingestionBatches,
   meters,
+  monitoringAlerts,
+  monitoringRuns,
   organizationMemberships,
   organizations,
   sites,
@@ -278,6 +284,351 @@ export async function listRecentReadings(organizationId: number) {
     .where(eq(sustainabilityReadings.organizationId, organizationId))
     .orderBy(desc(sustainabilityReadings.observedAt))
     .limit(30);
+}
+
+export async function listReadingsForMonitoring(organizationId: number) {
+  const database = await requireDb();
+  return database
+    .select({ reading: sustainabilityReadings, meter: meters })
+    .from(sustainabilityReadings)
+    .innerJoin(meters, eq(sustainabilityReadings.meterId, meters.id))
+    .where(eq(sustainabilityReadings.organizationId, organizationId))
+    .orderBy(sustainabilityReadings.observedAt)
+    .limit(500);
+}
+
+export async function listUnprocessedReadingsForMonitoring(organizationId: number, evaluationVersion: string) {
+  const database = await requireDb();
+  return database
+    .select({ reading: sustainabilityReadings, meter: meters })
+    .from(sustainabilityReadings)
+    .innerJoin(meters, eq(sustainabilityReadings.meterId, meters.id))
+    .leftJoin(dataQualityFindings, and(
+      eq(dataQualityFindings.readingId, sustainabilityReadings.id),
+      eq(dataQualityFindings.ruleId, "required-value"),
+      eq(dataQualityFindings.evaluationVersion, evaluationVersion),
+    ))
+    .where(and(eq(sustainabilityReadings.organizationId, organizationId), isNull(dataQualityFindings.id)))
+    .orderBy(sustainabilityReadings.observedAt)
+    .limit(500);
+}
+
+export async function listOrganizationsForMonitoring() {
+  const database = await requireDb();
+  return database.select({ id: organizations.id }).from(organizations).orderBy(organizations.id);
+}
+
+export async function beginMonitoringRun(input: {
+  organizationId: number;
+  runKey: string;
+  trigger: (typeof import("../drizzle/schema").monitoringRunTriggers)[number];
+}) {
+  const database = await requireDb();
+  const existing = await database
+    .select()
+    .from(monitoringRuns)
+    .where(and(eq(monitoringRuns.organizationId, input.organizationId), eq(monitoringRuns.runKey, input.runKey)))
+    .limit(1);
+  if (existing[0]) {
+    const run = existing[0];
+    if (run.status === "failed") {
+      await database.update(monitoringRuns).set({ status: "running", errorSummary: null, completedAt: null })
+        .where(eq(monitoringRuns.id, run.id));
+      return { created: true };
+    }
+    return {
+      created: false,
+      summary: {
+        organizationId: input.organizationId,
+        runKey: input.runKey,
+        readingsScanned: run.readingsScanned,
+        qualityFindingsCreated: run.qualityFindingsCreated,
+        anomaliesCreated: run.anomaliesCreated,
+        alertsCreated: run.alertsCreated,
+        ecoScoresUpdated: run.ecoScoresUpdated,
+        latestEcoScore: null,
+      },
+    };
+  }
+  await database.insert(monitoringRuns).values(input);
+  return { created: true };
+}
+
+export async function upsertQualityFindings(input: {
+  organizationId: number;
+  meterId: number;
+  readingId: number;
+  evaluationVersion: string;
+  findings: Array<{ ruleId: string; status: "passed" | "warning" | "failed"; message: string; details: Record<string, unknown> }>;
+}) {
+  const database = await requireDb();
+  let created = 0;
+  for (const finding of input.findings) {
+    const existing = await database
+      .select({ id: dataQualityFindings.id })
+      .from(dataQualityFindings)
+      .where(and(
+        eq(dataQualityFindings.readingId, input.readingId),
+        eq(dataQualityFindings.ruleId, finding.ruleId),
+        eq(dataQualityFindings.evaluationVersion, input.evaluationVersion),
+      ))
+      .limit(1);
+    if (!existing[0]) created += 1;
+    await database.insert(dataQualityFindings).values({
+      organizationId: input.organizationId,
+      meterId: input.meterId,
+      readingId: input.readingId,
+      ruleId: finding.ruleId,
+      status: finding.status,
+      message: finding.message,
+      details: finding.details,
+      evaluationVersion: input.evaluationVersion,
+    }).onDuplicateKeyUpdate({ set: { status: finding.status, message: finding.message, details: finding.details, evaluatedAt: new Date() } });
+  }
+  return { created };
+}
+
+export async function upsertCarbonCalculation(input: {
+  organizationId: number;
+  meterId: number;
+  readingId: number;
+  emittedKgCo2e: number;
+  emissionFactor: number;
+  factorVersion: string;
+  calculationVersion: string;
+}) {
+  const database = await requireDb();
+  await database.insert(carbonCalculations).values({
+    organizationId: input.organizationId,
+    meterId: input.meterId,
+    readingId: input.readingId,
+    emittedKgCo2e: input.emittedKgCo2e.toFixed(4),
+    emissionFactor: input.emissionFactor.toFixed(6),
+    factorVersion: input.factorVersion,
+    calculationVersion: input.calculationVersion,
+  }).onDuplicateKeyUpdate({
+    set: {
+      emittedKgCo2e: input.emittedKgCo2e.toFixed(4),
+      emissionFactor: input.emissionFactor.toFixed(6),
+      factorVersion: input.factorVersion,
+      computedAt: new Date(),
+    },
+  });
+}
+
+export async function createAnomalyIfAbsent(input: {
+  organizationId: number;
+  siteId: number;
+  meterId: number;
+  readingId: number;
+  detectorVersion: string;
+  severity: (typeof import("../drizzle/schema").anomalySeverities)[number];
+  baselineMean: number;
+  baselineStdDev: number;
+  observedValue: number;
+  zScore: number;
+  evidence: Record<string, unknown>;
+}) {
+  const database = await requireDb();
+  const existing = await database.select({ id: anomalyEvents.id }).from(anomalyEvents)
+    .where(and(eq(anomalyEvents.readingId, input.readingId), eq(anomalyEvents.detectorVersion, input.detectorVersion))).limit(1);
+  if (existing[0]) return { created: false, anomalyId: existing[0].id };
+  const [created] = await database.insert(anomalyEvents).values({
+    ...input,
+    baselineMean: input.baselineMean.toFixed(4),
+    baselineStdDev: input.baselineStdDev.toFixed(4),
+    observedValue: input.observedValue.toFixed(4),
+    zScore: input.zScore.toFixed(4),
+  }).$returningId();
+  await database.insert(auditEvents).values({
+    organizationId: input.organizationId,
+    eventType: "anomaly.detected",
+    resourceType: "anomaly_event",
+    resourceId: String(created.id),
+    payload: { meterId: input.meterId, readingId: input.readingId, severity: input.severity, detectorVersion: input.detectorVersion },
+  });
+  return { created: true, anomalyId: created.id };
+}
+
+export async function createMonitoringAlertIfAbsent(input: {
+  organizationId: number;
+  anomalyId: number;
+  severity: (typeof import("../drizzle/schema").anomalySeverities)[number];
+  title: string;
+  message: string;
+}) {
+  const database = await requireDb();
+  const existing = await database.select({ id: monitoringAlerts.id }).from(monitoringAlerts).where(eq(monitoringAlerts.anomalyId, input.anomalyId)).limit(1);
+  if (existing[0]) return { created: false, alertId: existing[0].id };
+  const [created] = await database.insert(monitoringAlerts).values(input).$returningId();
+  await database.insert(auditEvents).values({
+    organizationId: input.organizationId,
+    eventType: "alert.created",
+    resourceType: "monitoring_alert",
+    resourceId: String(created.id),
+    payload: { anomalyId: input.anomalyId, severity: input.severity },
+  });
+  return { created: true, alertId: created.id };
+}
+
+export async function listOpenAnomalySeverities(organizationId: number) {
+  const database = await requireDb();
+  const rows = await database.select({ severity: anomalyEvents.severity }).from(anomalyEvents)
+    .where(and(eq(anomalyEvents.organizationId, organizationId), eq(anomalyEvents.status, "open")));
+  return rows.map((row) => row.severity);
+}
+
+export async function createEcoScoreSnapshot(input: {
+  organizationId: number;
+  siteId?: number | null;
+  score: number;
+  components: Record<string, unknown>;
+  calculationVersion: string;
+  windowStart?: Date | null;
+  windowEnd?: Date | null;
+}) {
+  const database = await requireDb();
+  return (await database.insert(ecoScoreSnapshots).values({
+    organizationId: input.organizationId,
+    siteId: input.siteId ?? null,
+    score: input.score,
+    components: input.components,
+    calculationVersion: input.calculationVersion,
+    windowStart: input.windowStart ?? null,
+    windowEnd: input.windowEnd ?? null,
+  }).$returningId())[0];
+}
+
+export async function completeMonitoringRun(input: {
+  organizationId: number;
+  runKey: string;
+  readingsScanned: number;
+  qualityFindingsCreated: number;
+  anomaliesCreated: number;
+  alertsCreated: number;
+  ecoScoresUpdated: number;
+  summary: Record<string, unknown>;
+}) {
+  const database = await requireDb();
+  await database.update(monitoringRuns).set({
+    status: "completed",
+    readingsScanned: input.readingsScanned,
+    qualityFindingsCreated: input.qualityFindingsCreated,
+    anomaliesCreated: input.anomaliesCreated,
+    alertsCreated: input.alertsCreated,
+    ecoScoresUpdated: input.ecoScoresUpdated,
+    summary: input.summary,
+    completedAt: new Date(),
+  }).where(and(eq(monitoringRuns.organizationId, input.organizationId), eq(monitoringRuns.runKey, input.runKey)));
+}
+
+export async function failMonitoringRun(input: { organizationId: number; runKey: string; errorSummary: string }) {
+  const database = await requireDb();
+  await database.update(monitoringRuns).set({ status: "failed", errorSummary: input.errorSummary, completedAt: new Date() })
+    .where(and(eq(monitoringRuns.organizationId, input.organizationId), eq(monitoringRuns.runKey, input.runKey)));
+}
+
+export async function getMonitoringStatus(organizationId: number) {
+  const database = await requireDb();
+  const [latestRun, latestScore, openAlerts] = await Promise.all([
+    database.select().from(monitoringRuns).where(eq(monitoringRuns.organizationId, organizationId)).orderBy(desc(monitoringRuns.startedAt)).limit(1),
+    database.select().from(ecoScoreSnapshots).where(eq(ecoScoreSnapshots.organizationId, organizationId)).orderBy(desc(ecoScoreSnapshots.computedAt)).limit(1),
+    database.select({ value: count() }).from(monitoringAlerts).where(and(eq(monitoringAlerts.organizationId, organizationId), eq(monitoringAlerts.status, "open"))),
+  ]);
+  return { latestRun: latestRun[0] ?? null, latestScore: latestScore[0] ?? null, openAlertCount: Number(openAlerts[0]?.value ?? 0) };
+}
+
+export async function listEcoScoreHistory(organizationId: number, limit = 30) {
+  const database = await requireDb();
+  return database.select().from(ecoScoreSnapshots)
+    .where(eq(ecoScoreSnapshots.organizationId, organizationId))
+    .orderBy(desc(ecoScoreSnapshots.computedAt))
+    .limit(Math.min(Math.max(limit, 1), 100));
+}
+
+export async function getCarbonTotals(organizationId: number) {
+  const database = await requireDb();
+  const rows = await database.select({ totalKgCo2e: sum(carbonCalculations.emittedKgCo2e), calculationCount: count() })
+    .from(carbonCalculations)
+    .where(eq(carbonCalculations.organizationId, organizationId));
+  return {
+    totalKgCo2e: Number(rows[0]?.totalKgCo2e ?? 0),
+    calculationCount: Number(rows[0]?.calculationCount ?? 0),
+    factorLabel: "Pilot electricity factor: 0.82 kgCO2e/kWh; not a certified regional factor.",
+  };
+}
+
+export async function listRecentMonitoringAlerts(organizationId: number) {
+  const database = await requireDb();
+  return database.select({ alert: monitoringAlerts, anomaly: anomalyEvents, meter: meters })
+    .from(monitoringAlerts)
+    .innerJoin(anomalyEvents, eq(monitoringAlerts.anomalyId, anomalyEvents.id))
+    .innerJoin(meters, eq(anomalyEvents.meterId, meters.id))
+    .where(eq(monitoringAlerts.organizationId, organizationId))
+    .orderBy(desc(monitoringAlerts.createdAt))
+    .limit(25);
+}
+
+export async function listRecentAnomalies(organizationId: number) {
+  const database = await requireDb();
+  return database.select({ anomaly: anomalyEvents, meter: meters })
+    .from(anomalyEvents)
+    .innerJoin(meters, eq(anomalyEvents.meterId, meters.id))
+    .where(eq(anomalyEvents.organizationId, organizationId))
+    .orderBy(desc(anomalyEvents.detectedAt))
+    .limit(25);
+}
+
+export async function listRecentQualityFindings(organizationId: number) {
+  const database = await requireDb();
+  return database.select({ finding: dataQualityFindings, meter: meters })
+    .from(dataQualityFindings)
+    .innerJoin(meters, eq(dataQualityFindings.meterId, meters.id))
+    .where(eq(dataQualityFindings.organizationId, organizationId))
+    .orderBy(desc(dataQualityFindings.evaluatedAt))
+    .limit(50);
+}
+
+export async function acknowledgeMonitoringAlert(input: { organizationId: number; alertId: number; userId: number }) {
+  const database = await requireDb();
+  const alert = await database.select().from(monitoringAlerts)
+    .where(and(eq(monitoringAlerts.organizationId, input.organizationId), eq(monitoringAlerts.id, input.alertId))).limit(1);
+  if (!alert[0]) return undefined;
+  const now = new Date();
+  await database.transaction(async (tx) => {
+    await tx.update(monitoringAlerts).set({ status: "acknowledged", acknowledgedByUserId: input.userId, acknowledgedAt: now })
+      .where(eq(monitoringAlerts.id, input.alertId));
+    await tx.update(anomalyEvents).set({ status: "acknowledged", acknowledgedAt: now })
+      .where(eq(anomalyEvents.id, alert[0].anomalyId));
+    await tx.insert(auditEvents).values({
+      organizationId: input.organizationId,
+      actorUserId: input.userId,
+      eventType: "alert.acknowledged",
+      resourceType: "monitoring_alert",
+      resourceId: String(input.alertId),
+      payload: { anomalyId: alert[0].anomalyId },
+    });
+  });
+  return { id: input.alertId, status: "acknowledged" as const, acknowledgedAt: now };
+}
+
+export async function getMonitoringOverview(organizationId: number) {
+  const [status, alerts, anomalies, qualityFindings, carbonTotals] = await Promise.all([
+    getMonitoringStatus(organizationId),
+    listRecentMonitoringAlerts(organizationId),
+    listRecentAnomalies(organizationId),
+    listRecentQualityFindings(organizationId),
+    getCarbonTotals(organizationId),
+  ]);
+  return {
+    status,
+    alerts,
+    anomalies,
+    qualityFindings,
+    carbonTotals,
+    qualityWarnings: qualityFindings.filter((item) => item.finding.status === "warning").length,
+    qualityFailures: qualityFindings.filter((item) => item.finding.status === "failed").length,
+  };
 }
 
 export async function createSustainabilityAction(input: {
