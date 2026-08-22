@@ -9,6 +9,10 @@ export type AnomalyEvidenceInput = {
   observedValue: number;
   zScore: number;
   detectedAt: Date;
+  qualityStatuses?: string[];
+  forecast?: { id: number; status: string; calculationVersion: string; inputReadingCount: number } | null;
+  carbon?: { emittedKgCo2ePerUnit: number; factorVersion: string; calculationVersion: string } | null;
+  scenario?: { id: number; name: string; calculationVersion: string; carbonReductionKg: number } | null;
 };
 
 export type DeterministicRecommendation = {
@@ -16,8 +20,8 @@ export type DeterministicRecommendation = {
   title: string;
   rationale: string;
   confidence: number;
-  expectedImpact: { excessValue: number; unit: string; carbonOrSavingsEstimate: null; disclosure: string };
-  evidence: { anomalyId: number; baselineMean: number; observedValue: number; excessValue: number; zScore: number; detectedAt: string };
+  expectedImpact: { excessValue: number; unit: string; carbonOrSavingsEstimate: { excessKgCo2e: number; factorVersion: string; calculationVersion: string } | null; disclosure: string };
+  evidence: { anomalyId: number; baselineMean: number; observedValue: number; excessValue: number; zScore: number; detectedAt: string; qualityStatuses: string[]; forecast: AnomalyEvidenceInput["forecast"]; scenario: AnomalyEvidenceInput["scenario"] };
 };
 
 const units: Record<AnomalyEvidenceInput["resourceType"], string> = {
@@ -30,6 +34,11 @@ const units: Record<AnomalyEvidenceInput["resourceType"], string> = {
 
 export function buildAnomalyRecommendation(input: AnomalyEvidenceInput): DeterministicRecommendation {
   const excessValue = Math.max(0, Math.round((input.observedValue - input.baselineMean) * 10_000) / 10_000);
+  const carbonOrSavingsEstimate = input.carbon ? {
+    excessKgCo2e: Math.round(excessValue * input.carbon.emittedKgCo2ePerUnit * 10_000) / 10_000,
+    factorVersion: input.carbon.factorVersion,
+    calculationVersion: input.carbon.calculationVersion,
+  } : null;
   const priority = input.severity;
   const resourceLabel = input.resourceType === "energy" ? "energy" : input.resourceType;
   const action = input.resourceType === "energy"
@@ -44,8 +53,8 @@ export function buildAnomalyRecommendation(input: AnomalyEvidenceInput): Determi
     expectedImpact: {
       excessValue,
       unit: units[input.resourceType],
-      carbonOrSavingsEstimate: null,
-      disclosure: "No carbon or savings estimate is supplied because this recommendation has no approved factor or intervention scenario attached.",
+      carbonOrSavingsEstimate,
+      disclosure: carbonOrSavingsEstimate ? "The CO2e estimate is the observed excess multiplied by the persisted factor used for this reading; it is not a savings guarantee." : "No carbon or savings estimate is supplied because this recommendation has no persisted carbon factor for this reading.",
     },
     evidence: {
       anomalyId: input.anomalyId,
@@ -54,6 +63,9 @@ export function buildAnomalyRecommendation(input: AnomalyEvidenceInput): Determi
       excessValue,
       zScore: input.zScore,
       detectedAt: input.detectedAt.toISOString(),
+      qualityStatuses: input.qualityStatuses ?? [],
+      forecast: input.forecast ?? null,
+      scenario: input.scenario ?? null,
     },
   };
 }

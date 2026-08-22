@@ -1321,6 +1321,12 @@ export async function generateAnomalyRecommendations(input: { organizationId: nu
   let created = 0;
   const recommendationIds: number[] = [];
   for (const item of anomalies) {
+    const [qualityFindings, latestForecast, carbon, latestScenario] = await Promise.all([
+      database.select({ status: dataQualityFindings.status }).from(dataQualityFindings).where(and(eq(dataQualityFindings.organizationId, input.organizationId), eq(dataQualityFindings.readingId, item.anomaly.readingId))).limit(20),
+      database.select({ id: sustainabilityForecasts.id, status: sustainabilityForecasts.status, calculationVersion: sustainabilityForecasts.calculationVersion, inputReadingCount: sustainabilityForecasts.inputReadingCount }).from(sustainabilityForecasts).where(and(eq(sustainabilityForecasts.organizationId, input.organizationId), eq(sustainabilityForecasts.meterId, item.meter.id))).orderBy(desc(sustainabilityForecasts.generatedAt)).limit(1),
+      database.select({ emissionFactor: carbonCalculations.emissionFactor, factorVersion: carbonCalculations.factorVersion, calculationVersion: carbonCalculations.calculationVersion }).from(carbonCalculations).where(and(eq(carbonCalculations.organizationId, input.organizationId), eq(carbonCalculations.readingId, item.anomaly.readingId))).orderBy(desc(carbonCalculations.computedAt)).limit(1),
+      database.select({ id: sustainabilityScenarios.id, name: sustainabilityScenarios.name, calculationVersion: sustainabilityScenarios.calculationVersion, results: sustainabilityScenarios.results }).from(sustainabilityScenarios).where(and(eq(sustainabilityScenarios.organizationId, input.organizationId), eq(sustainabilityScenarios.siteId, item.anomaly.siteId))).orderBy(desc(sustainabilityScenarios.updatedAt)).limit(1),
+    ]);
     const recommendation = buildAnomalyRecommendation({
       anomalyId: item.anomaly.id,
       resourceType: item.meter.resourceType,
@@ -1330,6 +1336,10 @@ export async function generateAnomalyRecommendations(input: { organizationId: nu
       observedValue: Number(item.anomaly.observedValue),
       zScore: Number(item.anomaly.zScore),
       detectedAt: item.anomaly.detectedAt,
+      qualityStatuses: qualityFindings.map((finding) => finding.status),
+      forecast: latestForecast[0] ?? null,
+      carbon: carbon[0] ? { emittedKgCo2ePerUnit: Number(carbon[0].emissionFactor), factorVersion: carbon[0].factorVersion, calculationVersion: carbon[0].calculationVersion } : null,
+      scenario: latestScenario[0] ? { id: latestScenario[0].id, name: latestScenario[0].name, calculationVersion: latestScenario[0].calculationVersion, carbonReductionKg: Number(latestScenario[0].results.carbonReductionKg) } : null,
     });
     const existing = await database.select({ id: sustainabilityRecommendations.id }).from(sustainabilityRecommendations)
       .where(and(eq(sustainabilityRecommendations.anomalyId, item.anomaly.id), eq(sustainabilityRecommendations.recommendationVersion, RECOMMENDATION_VERSION))).limit(1);
@@ -1341,6 +1351,7 @@ export async function generateAnomalyRecommendations(input: { organizationId: nu
       organizationId: input.organizationId,
       siteId: item.anomaly.siteId,
       anomalyId: item.anomaly.id,
+      forecastId: latestForecast[0]?.id ?? null,
       priority: recommendation.priority,
       title: recommendation.title,
       rationale: recommendation.rationale,
@@ -1394,10 +1405,13 @@ export async function acceptRecommendationAsAction(input: { organizationId: numb
   )).limit(1);
   if (!recommendation[0]) return undefined;
   if (recommendation[0].actionId) return { actionId: recommendation[0].actionId, idempotent: true };
+  const evidence = recommendation[0].evidence as { scenario?: { id?: number } };
+  const scenarioId = typeof evidence.scenario?.id === "number" ? evidence.scenario.id : null;
   return database.transaction(async (tx) => {
     const [action] = await tx.insert(sustainabilityActions).values({
       organizationId: input.organizationId,
       siteId: recommendation[0].siteId,
+      scenarioId,
       title: recommendation[0].title,
       description: recommendation[0].rationale,
       source: "recommendation",
@@ -1406,7 +1420,7 @@ export async function acceptRecommendationAsAction(input: { organizationId: numb
       ownerUserId: input.userId,
     }).$returningId();
     await tx.update(sustainabilityRecommendations).set({ status: "accepted", actionId: action.id }).where(eq(sustainabilityRecommendations.id, input.recommendationId));
-    await tx.insert(auditEvents).values({ organizationId: input.organizationId, actorUserId: input.userId, eventType: "recommendation.accepted_as_action", resourceType: "sustainability_recommendation", resourceId: String(input.recommendationId), payload: { actionId: action.id } });
+    await tx.insert(auditEvents).values({ organizationId: input.organizationId, actorUserId: input.userId, eventType: "recommendation.accepted_as_action", resourceType: "sustainability_recommendation", resourceId: String(input.recommendationId), payload: { actionId: action.id, scenarioId } });
     return { actionId: action.id, idempotent: false };
   });
 }

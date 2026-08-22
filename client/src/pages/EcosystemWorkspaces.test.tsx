@@ -97,6 +97,7 @@ describe("authenticated ecosystem workspaces", () => {
     cleanup();
     render(<ActionsWorkspace />);
     expect(screen.getByRole("heading", { name: "Turn a signal into accountable work." })).toBeTruthy();
+    expect(screen.getByLabelText("Source scenario")).toBeTruthy();
     cleanup();
     render(<ReportsWorkspace />);
     expect(screen.getByRole("heading", { name: "Export only what the records support." })).toBeTruthy();
@@ -138,6 +139,12 @@ describe("authenticated ecosystem workspaces", () => {
     expect(screen.getByText(/Action #77: Escalated monitoring alert/)).toBeTruthy();
     expect(screen.getByText("SUPPRESSED · due 8/22/2026, 8:00:00 AM")).toBeTruthy();
     expect(screen.getByText("RESOLVED · due 8/22/2026, 8:00:00 AM")).toBeTruthy();
+  });
+
+  it("renders a persisted saved-scenario attribution on an action without presenting modeled impact as realized", () => {
+    testApi.actionList.mockReturnValue(query([{ id: 71, title: "HVAC controls follow-up", description: "Review modeled controls option.", priority: "high", status: "proposed", scenarioId: 84, expectedCarbonReductionKg: null }]));
+    render(<ActionsWorkspace />);
+    expect(screen.getByText("Modeled scenario #84 linked")).toBeTruthy();
   });
 
   it("covers loading and mutation feedback without concealing server outcomes", async () => {

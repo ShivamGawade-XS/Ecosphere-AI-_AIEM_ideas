@@ -280,6 +280,22 @@ describe("EcoSphere core API", () => {
     expect(database.updateSustainabilityActionStatus).toHaveBeenCalledWith({ organizationId: 8, actionId: 71, status: "completed", userId: 17 });
   });
 
+  it("denies action collaboration, comparison, and report-snapshot records outside the caller tenant", async () => {
+    database.getOrganizationMembership.mockResolvedValue(undefined);
+    const caller = appRouter.createCaller(createAuthenticatedContext());
+
+    await expect(caller.actions.collaboration({ organizationId: 9, actionId: 71 })).rejects.toMatchObject<Partial<TRPCError>>({ code: "FORBIDDEN" });
+    await expect(caller.comparisons.list({ organizationId: 9 })).rejects.toMatchObject<Partial<TRPCError>>({ code: "FORBIDDEN" });
+    await expect(caller.reports.snapshots({ organizationId: 9 })).rejects.toMatchObject<Partial<TRPCError>>({ code: "FORBIDDEN" });
+    await expect(caller.comparisons.create({ organizationId: 9, name: "Cross-tenant comparison", scenarioIds: [84, 85] })).rejects.toMatchObject<Partial<TRPCError>>({ code: "FORBIDDEN" });
+    await expect(caller.reports.createSnapshot({ organizationId: 9, title: "Cross-tenant evidence" })).rejects.toMatchObject<Partial<TRPCError>>({ code: "FORBIDDEN" });
+    expect(database.getActionCollaboration).not.toHaveBeenCalledWith(9, 71);
+    expect(database.listInterventionComparisons).not.toHaveBeenCalledWith(9);
+    expect(database.listSustainabilityReportSnapshots).not.toHaveBeenCalledWith(9);
+    expect(database.createInterventionComparison).not.toHaveBeenCalledWith(expect.objectContaining({ organizationId: 9 }));
+    expect(database.createSustainabilityReportSnapshot).not.toHaveBeenCalledWith(expect.objectContaining({ organizationId: 9 }));
+  });
+
   it("returns tenant-scoped CSV source-file evidence and requires governance roles for factor approval", async () => {
     const caller = appRouter.createCaller(createAuthenticatedContext());
     const imports = await caller.imports.list({ organizationId: 8 });
