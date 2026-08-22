@@ -23,3 +23,7 @@ The authenticated Actions workspace also created the intervention **Review HVAC 
 The authenticated Scenario workspace calculated the `HVAC reduction option` with the explicit `pilot-v1` deterministic factor set. It returned a baseline of **6,672 kgCO₂e**, projected **5,786 kgCO₂e**, and a modeled **886 kgCO₂e** reduction, then saved that output, all input assumptions, and its calculation version into tenant decision history at 05:19 on 22 August 2026.
 
 After the action transition, the Overview reflected **1 active action** alongside the registered meter and validated reading. Reports then independently summarized the same tenant scope as **1 site**, **1 meter**, **1 reading**, **1 action**, and ingestion batch **#1** with `1/1 accepted`. This completes the authenticated Registry → Live Data → Overview → Reports persistence verification.
+
+The default root route was updated and verified to open the authenticated **Operations Overview** with all eight workspace links and live tenant evidence. The former landing experience is preserved at `/narrative`; both its header and hero expose explicit **Open workspace / Open mission control** links back to the complete product ecosystem.
+
+Automated entry-route coverage now verifies the same separation: `/` renders the protected Operations Overview inside the operations shell, while `/narrative` renders the standalone public Field Operations Ledger narrative. The final validation run completed with **7 test files and 25 tests passing**, clean TypeScript, and a successful production build.

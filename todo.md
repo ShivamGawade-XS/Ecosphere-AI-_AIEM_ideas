@@ -55,3 +55,16 @@
 - [x] Verify every authenticated ecosystem route at mobile size and record the result.
 - [x] Add page-level loading states for Actions and Scenario workspace queries.
 - [x] Add frontend tests for loading and mutation success/error feedback across Intelligence, Actions, Reports, and Scenarios.
+
+## Product Entry and Discoverability
+
+- [x] Promote the authenticated Operations Overview to the default product route.
+- [x] Retain the narrative landing experience on a clearly labeled public route.
+- [x] Add clear product-entry actions and app-shell navigation that expose every functional workspace.
+- [x] Add and run entry-flow tests for the default product and public narrative routes.
+
+## Route Entry Coverage Follow-up
+
+- [x] Add automated route-entry tests proving `/` renders Operations Overview and `/narrative` renders the public narrative.
+- [x] Re-run the full suite and record the passing entry-route evidence.
+- [x] Confirm the persisted route-entry verification record and rerun the final quality gate after documentation changes.

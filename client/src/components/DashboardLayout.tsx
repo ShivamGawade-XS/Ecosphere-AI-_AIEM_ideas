@@ -37,7 +37,7 @@ const menuItems = [
   { icon: ClipboardCheck, label: "Actions", path: "/app/actions" },
   { icon: FileText, label: "Reports", path: "/app/reports" },
   { icon: Radar, label: "Readiness", path: "/app/readiness" },
-  { icon: House, label: "Public narrative", path: "/" },
+  { icon: House, label: "Public narrative", path: "/narrative" },
 ];
 
 const SIDEBAR_WIDTH_KEY = "sidebar-width";

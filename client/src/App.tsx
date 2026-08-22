@@ -1,7 +1,7 @@
 /** Field Operations Ledger style: a single, calm editorial experience for EcoSphere AI. */
 import NotFound from "@/pages/NotFound";
 import { Route, Switch } from "wouter";
-import { lazy, ReactNode, Suspense } from "react";
+import React, { lazy, ReactNode, Suspense } from "react";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import DashboardLayout from "./components/DashboardLayout";
@@ -28,7 +28,8 @@ function Router() {
   // make sure to consider if you need authentication for certain routes
   return (
     <Switch>
-      <Route path={"/"}><Suspense fallback={<RouteLoading />}><Home /></Suspense></Route>
+      <Route path={"/"}><ProtectedWorkspace><OperationsOverview /></ProtectedWorkspace></Route>
+      <Route path={"/narrative"}><Suspense fallback={<RouteLoading />}><Home /></Suspense></Route>
       <Route path={"/app"}><ProtectedWorkspace><OperationsOverview /></ProtectedWorkspace></Route>
       <Route path={"/app/registry"}><ProtectedWorkspace><RegistryWorkspace /></ProtectedWorkspace></Route>
       <Route path={"/app/data"}><ProtectedWorkspace><IngestionWorkbench /></ProtectedWorkspace></Route>

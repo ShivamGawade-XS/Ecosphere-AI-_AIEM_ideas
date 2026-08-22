@@ -156,7 +156,7 @@ export default function Home() {
   return (
     <main className="site-shell">
       <header className="site-header">
-        <a href="#top" className="brand-link" aria-label="EcoSphere AI home">
+        <a href="/narrative" className="brand-link" aria-label="EcoSphere AI public narrative">
           <EcoSphereMark />
         </a>
         <nav className="top-nav" aria-label="Primary navigation">
@@ -164,9 +164,9 @@ export default function Home() {
           <a href="#simulator">Scenario engine</a>
           <a href="#pilot">Pilot scope</a>
         </nav>
-        <button className="header-cta" onClick={() => scrollToSection("simulator")}>
-          Model an action <ArrowDownRight size={16} />
-        </button>
+        <a className="header-cta" href="/">
+          Open workspace <ArrowDownRight size={16} />
+        </a>
       </header>
 
       <section id="top" className="hero-section">
@@ -182,11 +182,11 @@ export default function Home() {
             EcoSphere AI turns campus resource signals into a traceable operations loop—from measurement and anomaly detection to a modeled intervention and its next practical action.
           </p>
           <div className="hero-actions">
-            <button className="button button--ink" onClick={() => scrollToSection("loop")}>
-              Follow the evidence <MoveRight size={18} />
-            </button>
-            <button className="text-button" onClick={() => scrollToSection("pilot")}>
-              Read the pilot boundary <ChevronRight size={17} />
+            <a className="button button--ink" href="/">
+              Open mission control <MoveRight size={18} />
+            </a>
+            <button className="text-button" onClick={() => scrollToSection("loop")}>
+              Explore the pilot narrative <ChevronRight size={17} />
             </button>
           </div>
           <div className="hero-footnote">

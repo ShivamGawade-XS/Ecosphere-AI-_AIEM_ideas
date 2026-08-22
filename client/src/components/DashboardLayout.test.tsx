@@ -24,5 +24,7 @@ describe("DashboardLayout operational index", () => {
     await waitFor(() => expect(window.location.pathname).toBe("/app/scenarios"));
     fireEvent.click(screen.getByText("Reports"));
     await waitFor(() => expect(window.location.pathname).toBe("/app/reports"));
+    fireEvent.click(screen.getByText("Public narrative"));
+    await waitFor(() => expect(window.location.pathname).toBe("/narrative"));
   });
 });
