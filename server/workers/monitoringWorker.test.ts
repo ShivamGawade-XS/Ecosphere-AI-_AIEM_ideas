@@ -4,13 +4,16 @@ const database = vi.hoisted(() => ({
   beginMonitoringRun: vi.fn(),
   listReadingsForMonitoring: vi.fn(),
   listUnprocessedReadingsForMonitoring: vi.fn(),
+  listApprovedEmissionFactors: vi.fn(),
   upsertQualityFindings: vi.fn(),
   createAnomalyIfAbsent: vi.fn(),
   createMonitoringAlertIfAbsent: vi.fn(),
   upsertCarbonCalculation: vi.fn(),
   listOpenAnomalySeverities: vi.fn(),
   createEcoScoreSnapshot: vi.fn(),
+  evaluateAlertEscalations: vi.fn(),
   completeMonitoringRun: vi.fn(),
+  resolveMonitoringRecoveryForRun: vi.fn(),
   failMonitoringRun: vi.fn(),
   listOrganizationsForMonitoring: vi.fn(),
 }));
@@ -31,6 +34,7 @@ describe("monitoring worker", () => {
     vi.clearAllMocks();
     database.upsertQualityFindings.mockResolvedValue({ created: 4 });
     database.listOpenAnomalySeverities.mockResolvedValue([]);
+    database.listApprovedEmissionFactors.mockResolvedValue([]);
   });
 
   it("skips an existing idempotency key without rescanning readings", async () => {
@@ -53,6 +57,7 @@ describe("monitoring worker", () => {
     expect(result).toMatchObject({ status: "completed", readingsScanned: 4, qualityFindingsCreated: 16, anomaliesCreated: 0, ecoScoresUpdated: 1, latestEcoScore: 100 });
     expect(database.upsertCarbonCalculation).toHaveBeenCalledTimes(4);
     expect(database.createEcoScoreSnapshot).toHaveBeenCalledWith(expect.objectContaining({ organizationId: 8, score: 100 }));
+    expect(database.evaluateAlertEscalations).toHaveBeenCalledWith(8);
     expect(database.completeMonitoringRun).toHaveBeenCalledWith(expect.objectContaining({ runKey: "manual:new-run", readingsScanned: 4 }));
   });
 });

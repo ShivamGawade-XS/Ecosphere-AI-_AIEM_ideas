@@ -26,6 +26,14 @@ export const anomalyStatuses = ["open", "acknowledged", "resolved"] as const;
 export const alertStatuses = ["open", "acknowledged", "resolved"] as const;
 export const monitoringRunTriggers = ["manual", "scheduled", "cli"] as const;
 export const monitoringRunStatuses = ["running", "completed", "failed", "skipped"] as const;
+export const monitoringRecoveryStatuses = ["open", "retrying", "resolved"] as const;
+export const alertDeliveryChannels = ["owner_notification"] as const;
+export const alertDeliveryStatuses = ["queued", "delivered", "failed", "suppressed"] as const;
+export const alertEscalationStatuses = ["pending", "triggered", "suppressed", "resolved"] as const;
+export const dataImportFileStatuses = ["uploaded", "previewed", "committed", "completed_with_errors", "failed"] as const;
+export const dataImportRowStatuses = ["valid", "rejected", "imported"] as const;
+export const readingCorrectionStatuses = ["approved", "rejected"] as const;
+export const emissionFactorStatuses = ["draft", "approved", "archived"] as const;
 
 export type ScenarioAssumptions = {
   baselineEnergyKwh: number;
@@ -170,12 +178,122 @@ export const sustainabilityReadings = mysqlTable(
     qualityStatus: mysqlEnum("qualityStatus", qualityStatuses).notNull().default("accepted"),
     qualityReason: varchar("qualityReason", { length: 320 }),
     provenance: json("provenance"),
+    supersededAt: timestamp("supersededAt"),
     createdAt: timestamp("createdAt").defaultNow().notNull(),
   },
   (table) => [
     uniqueIndex("readings_meter_key_unique").on(table.meterId, table.idempotencyKey),
     index("readings_org_observed_idx").on(table.organizationId, table.observedAt),
     index("readings_meter_observed_idx").on(table.meterId, table.observedAt),
+  ],
+);
+
+/** Source file and deterministic parse/validation lifecycle for a controlled CSV import. */
+export const dataImportFiles = mysqlTable(
+  "data_import_files",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    organizationId: int("organizationId").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    uploadedByUserId: int("uploadedByUserId").notNull().references(() => users.id),
+    ingestionBatchId: int("ingestionBatchId").references(() => ingestionBatches.id, { onDelete: "set null" }),
+    fileName: varchar("fileName", { length: 255 }).notNull(),
+    contentType: varchar("contentType", { length: 128 }).notNull().default("text/csv"),
+    storageKey: varchar("storageKey", { length: 512 }).notNull(),
+    contentHash: varchar("contentHash", { length: 128 }).notNull(),
+    idempotencyKey: varchar("idempotencyKey", { length: 160 }).notNull(),
+    byteSize: int("byteSize").notNull(),
+    status: mysqlEnum("status", dataImportFileStatuses).notNull().default("uploaded"),
+    totalRows: int("totalRows").notNull().default(0),
+    validRows: int("validRows").notNull().default(0),
+    rejectedRows: int("rejectedRows").notNull().default(0),
+    errorSummary: text("errorSummary"),
+    previewedAt: timestamp("previewedAt"),
+    committedAt: timestamp("committedAt"),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("data_import_files_org_key_unique").on(table.organizationId, table.idempotencyKey),
+    index("data_import_files_org_created_idx").on(table.organizationId, table.createdAt),
+    index("data_import_files_batch_idx").on(table.ingestionBatchId),
+  ],
+);
+
+/** Immutable row-level validation evidence for a CSV import. */
+export const dataImportRows = mysqlTable(
+  "data_import_rows",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    importFileId: int("importFileId").notNull().references(() => dataImportFiles.id, { onDelete: "cascade" }),
+    organizationId: int("organizationId").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    rowNumber: int("rowNumber").notNull(),
+    rawRecord: json("rawRecord").notNull(),
+    meterKey: varchar("meterKey", { length: 96 }),
+    observedAt: timestamp("observedAt"),
+    value: decimal("value", { precision: 16, scale: 4 }),
+    unit: varchar("unit", { length: 24 }),
+    status: mysqlEnum("status", dataImportRowStatuses).notNull(),
+    validationErrors: json("validationErrors"),
+    readingId: int("readingId").references(() => sustainabilityReadings.id, { onDelete: "set null" }),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("data_import_rows_file_number_unique").on(table.importFileId, table.rowNumber),
+    index("data_import_rows_org_status_idx").on(table.organizationId, table.status),
+    index("data_import_rows_reading_idx").on(table.readingId),
+  ],
+);
+
+/** Immutable correction lineage; original source readings are retained and superseded only after approval. */
+export const readingCorrections = mysqlTable(
+  "reading_corrections",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    organizationId: int("organizationId").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    originalReadingId: int("originalReadingId").notNull().references(() => sustainabilityReadings.id, { onDelete: "cascade" }),
+    correctedReadingId: int("correctedReadingId").references(() => sustainabilityReadings.id, { onDelete: "set null" }),
+    status: mysqlEnum("status", readingCorrectionStatuses).notNull().default("approved"),
+    reason: varchar("reason", { length: 500 }).notNull(),
+    submittedByUserId: int("submittedByUserId").notNull().references(() => users.id),
+    approvedByUserId: int("approvedByUserId").references(() => users.id, { onDelete: "set null" }),
+    approvedAt: timestamp("approvedAt"),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+  },
+  (table) => [
+    index("reading_corrections_org_created_idx").on(table.organizationId, table.createdAt),
+    index("reading_corrections_original_idx").on(table.originalReadingId),
+    index("reading_corrections_corrected_idx").on(table.correctedReadingId),
+  ],
+);
+
+/** Tenant-governed emissions factor record; only approved valid factors may drive production carbon calculations. */
+export const emissionFactors = mysqlTable(
+  "emission_factors",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    organizationId: int("organizationId").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    resourceType: mysqlEnum("resourceType", resourceTypes).notNull(),
+    inputUnit: varchar("inputUnit", { length: 24 }).notNull(),
+    emittedKgCo2ePerUnit: decimal("emittedKgCo2ePerUnit", { precision: 16, scale: 8 }).notNull(),
+    scope: varchar("scope", { length: 48 }).notNull(),
+    geography: varchar("geography", { length: 160 }).notNull(),
+    methodology: varchar("methodology", { length: 240 }).notNull(),
+    sourceName: varchar("sourceName", { length: 240 }).notNull(),
+    sourceUrl: varchar("sourceUrl", { length: 512 }),
+    factorVersion: varchar("factorVersion", { length: 64 }).notNull(),
+    validFrom: timestamp("validFrom").notNull(),
+    validTo: timestamp("validTo"),
+    status: mysqlEnum("status", emissionFactorStatuses).notNull().default("draft"),
+    createdByUserId: int("createdByUserId").notNull().references(() => users.id),
+    approvedByUserId: int("approvedByUserId").references(() => users.id, { onDelete: "set null" }),
+    approvedAt: timestamp("approvedAt"),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("emission_factors_org_version_unique").on(table.organizationId, table.factorVersion),
+    index("emission_factors_org_status_idx").on(table.organizationId, table.status),
+    index("emission_factors_lookup_idx").on(table.organizationId, table.resourceType, table.inputUnit, table.status, table.validFrom),
   ],
 );
 
@@ -379,6 +497,113 @@ export const monitoringRuns = mysqlTable(
   ],
 );
 
+/** Expected cadence and stale threshold for the deployed scheduled monitoring callback. */
+export const monitoringServiceTargets = mysqlTable(
+  "monitoring_service_targets",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    organizationId: int("organizationId").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    targetKey: varchar("targetKey", { length: 64 }).notNull().default("scheduled-monitoring"),
+    expectedIntervalMinutes: int("expectedIntervalMinutes").notNull().default(15),
+    staleAfterMinutes: int("staleAfterMinutes").notNull().default(45),
+    isEnabled: boolean("isEnabled").notNull().default(false),
+    createdByUserId: int("createdByUserId").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  (table) => [uniqueIndex("monitoring_targets_org_key_unique").on(table.organizationId, table.targetKey)],
+);
+
+/** A durable incident/recovery record for failed or stale monitoring work. */
+export const monitoringRecoveryEvents = mysqlTable(
+  "monitoring_recovery_events",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    organizationId: int("organizationId").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    monitoringRunId: int("monitoringRunId").references(() => monitoringRuns.id, { onDelete: "set null" }),
+    status: mysqlEnum("status", monitoringRecoveryStatuses).notNull().default("open"),
+    reason: varchar("reason", { length: 500 }).notNull(),
+    retryRunKey: varchar("retryRunKey", { length: 160 }),
+    attemptCount: int("attemptCount").notNull().default(0),
+    detectedAt: timestamp("detectedAt").defaultNow().notNull(),
+    resolvedAt: timestamp("resolvedAt"),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  (table) => [index("monitoring_recovery_org_status_idx").on(table.organizationId, table.status), index("monitoring_recovery_run_idx").on(table.monitoringRunId)],
+);
+
+/** Organization policy for the owner-facing alert channel; disabled until a manager explicitly enables it. */
+export const alertRoutingPreferences = mysqlTable(
+  "alert_routing_preferences",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    organizationId: int("organizationId").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    channel: mysqlEnum("channel", alertDeliveryChannels).notNull().default("owner_notification"),
+    minimumSeverity: mysqlEnum("minimumSeverity", anomalySeverities).notNull().default("high"),
+    isEnabled: boolean("isEnabled").notNull().default(false),
+    updatedByUserId: int("updatedByUserId").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  (table) => [uniqueIndex("alert_routing_org_channel_unique").on(table.organizationId, table.channel)],
+);
+
+/** Delivery evidence for each channel decision—successful, failed, queued, or deliberately suppressed. */
+export const alertDeliveryAttempts = mysqlTable(
+  "alert_delivery_attempts",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    organizationId: int("organizationId").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    alertId: int("alertId").notNull().references(() => monitoringAlerts.id, { onDelete: "cascade" }),
+    routingPreferenceId: int("routingPreferenceId").references(() => alertRoutingPreferences.id, { onDelete: "set null" }),
+    channel: mysqlEnum("channel", alertDeliveryChannels).notNull(),
+    status: mysqlEnum("status", alertDeliveryStatuses).notNull().default("queued"),
+    attemptNumber: int("attemptNumber").notNull().default(1),
+    errorSummary: varchar("errorSummary", { length: 500 }),
+    providerReference: varchar("providerReference", { length: 160 }),
+    requestedAt: timestamp("requestedAt").defaultNow().notNull(),
+    deliveredAt: timestamp("deliveredAt"),
+  },
+  (table) => [uniqueIndex("alert_delivery_alert_channel_attempt_unique").on(table.alertId, table.channel, table.attemptNumber), index("alert_delivery_org_requested_idx").on(table.organizationId, table.requestedAt), index("alert_delivery_alert_idx").on(table.alertId)],
+);
+
+/** Organization policy for escalating persistent high-severity monitoring alerts into accountable work. */
+export const alertEscalationPolicies = mysqlTable(
+  "alert_escalation_policies",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    organizationId: int("organizationId").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    minimumSeverity: mysqlEnum("minimumSeverity", anomalySeverities).notNull().default("critical"),
+    afterMinutes: int("afterMinutes").notNull().default(60),
+    isEnabled: boolean("isEnabled").notNull().default(false),
+    updatedByUserId: int("updatedByUserId").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  (table) => [uniqueIndex("alert_escalation_policy_org_unique").on(table.organizationId)],
+);
+
+/** Immutable lifecycle record for an alert escalated into an accountable sustainability action. */
+export const alertEscalations = mysqlTable(
+  "alert_escalations",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    organizationId: int("organizationId").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    alertId: int("alertId").notNull().references(() => monitoringAlerts.id, { onDelete: "cascade" }),
+    policyId: int("policyId").references(() => alertEscalationPolicies.id, { onDelete: "set null" }),
+    actionId: int("actionId").references(() => sustainabilityActions.id, { onDelete: "set null" }),
+    status: mysqlEnum("status", alertEscalationStatuses).notNull().default("pending"),
+    dueAt: timestamp("dueAt").notNull(),
+    triggeredAt: timestamp("triggeredAt"),
+    resolvedAt: timestamp("resolvedAt"),
+    reason: varchar("reason", { length: 500 }).notNull(),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  (table) => [uniqueIndex("alert_escalations_alert_unique").on(table.alertId), index("alert_escalations_org_status_due_idx").on(table.organizationId, table.status, table.dueAt), index("alert_escalations_action_idx").on(table.actionId)],
+);
+
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
 export type Organization = typeof organizations.$inferSelect;
@@ -393,3 +618,13 @@ export type AnomalyEvent = typeof anomalyEvents.$inferSelect;
 export type MonitoringAlert = typeof monitoringAlerts.$inferSelect;
 export type EcoScoreSnapshot = typeof ecoScoreSnapshots.$inferSelect;
 export type MonitoringRun = typeof monitoringRuns.$inferSelect;
+export type MonitoringServiceTarget = typeof monitoringServiceTargets.$inferSelect;
+export type MonitoringRecoveryEvent = typeof monitoringRecoveryEvents.$inferSelect;
+export type AlertRoutingPreference = typeof alertRoutingPreferences.$inferSelect;
+export type AlertDeliveryAttempt = typeof alertDeliveryAttempts.$inferSelect;
+export type AlertEscalationPolicy = typeof alertEscalationPolicies.$inferSelect;
+export type AlertEscalation = typeof alertEscalations.$inferSelect;
+export type DataImportFile = typeof dataImportFiles.$inferSelect;
+export type DataImportRow = typeof dataImportRows.$inferSelect;
+export type ReadingCorrection = typeof readingCorrections.$inferSelect;
+export type EmissionFactor = typeof emissionFactors.$inferSelect;

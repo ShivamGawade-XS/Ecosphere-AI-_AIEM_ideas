@@ -63,3 +63,11 @@ The completed run evaluated **4 newly unprocessed readings**, created **1 critic
 The authorized user then acknowledged the critical alert in the same workspace. The alert and anomaly both displayed `acknowledged`, and the open-alert metric changed from **1** to **0**. A client-cache follow-up fix invalidates all status/readiness evidence after acknowledgement so the pipeline summary cannot retain a stale open-alert count.
 
 After a full browser reload, Intelligence still displayed EcoScore **65**, **0** open alerts, the acknowledged critical alert, and the z-score **23.30** anomaly evidence. The refreshed pipeline correctly reported “Latest run: completed; 0 open alerts,” confirming that persisted records—not browser state—drive the reviewed monitoring result.
+
+## R1 trusted data plane and R2 operations controls
+
+The authenticated **Live Data** workspace was reviewed at desktop width after the R1 update. It exposes source registration, explicitly labeled simulated intake, CSV preview/quarantine/commit controls, factor governance, and correction lineage. The UI does not present simulated values as campus telemetry and retains a clear distinction between valid, quarantined, active, and superseded evidence.
+
+The authenticated **Intelligence** workspace was reviewed at desktop width after the R2 update. It surfaces persisted EcoScore, alert/anomaly evidence, manual one-shot worker control, disabled-by-default scheduled-worker health, recovery queue, and opt-in owner-notification routing. The page explicitly states that saving a health target does not create an external platform schedule and that owner-delivery outcomes are recorded rather than assumed.
+
+The same Intelligence review verified the **In-app escalation** surface. Its policy is disabled by default; when a manager enables it, the bounded evaluator can create a persisted pending, triggered, suppressed, or resolved escalation record and, after the configured threshold, create an accountable sustainability action. The UI explicitly excludes email, SMS, Slack, campus escalation, and guaranteed external response from this feature.

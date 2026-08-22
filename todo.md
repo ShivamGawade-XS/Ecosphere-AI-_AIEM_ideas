@@ -102,3 +102,46 @@
 
 - [x] Review the current verified platform state and gap inventory for a complete feature catalogue.
 - [x] Deliver a detailed, prioritized feature catalogue covering product modules, technical foundations, operations, security, and rollout.
+
+## Production Delivery Programme
+
+- [x] Create a production release roadmap with explicit scope, dependency, claim-safety, and acceptance gates.
+- [ ] Build CSV import, quarantine, correction, lineage, and governed emissions-factor foundations.
+- [ ] Activate deployed-style monitoring health, durable retry/recovery, alert routing, and scheduler operational runbooks.
+- [ ] Build forecast, evidence-linked recommendation, action collaboration, comparison, and reporting modules.
+- [ ] Add invitation/role management, security controls, audit views, and administration workflows.
+- [ ] Add health, observability, backup/recovery, CI-quality, accessibility, performance, and release-operation foundations.
+- [ ] Validate full production-release journeys and document remaining external deployment or integration dependencies honestly.
+
+### R1 — Trusted Data Plane
+
+- [x] Add versioned factor, import-file, import-row, and reading-correction persistence records with tenant-scoped indexes.
+- [x] Add deterministic CSV parse/preview/validation services with canonical-unit and meter-key mapping.
+- [x] Add idempotent CSV commit and quarantine handling, preserving source-file provenance and audit evidence.
+- [x] Add approved-factor selection to carbon calculations while retaining the clearly labeled pilot fallback only where appropriate.
+- [x] Add protected factor-library, import, quarantine, correction, and lineage APIs with role checks.
+- [x] Add functional Data Quality workspace controls and import/factor/evidence views with loading, error, and empty states.
+- [ ] Add unit, API, and browser tests for import validation, replay idempotency, factor selection, correction lineage, and tenant isolation.
+- [x] Add tenant-scoped lineage APIs for import-file, quarantined-row, reading, provenance, and correction chains with authorization tests.
+- [x] Add correction and lineage evidence views with loading, empty, and explicit error states for imports, quarantine, factors, and reading corrections.
+- [x] Add mutation-error feedback for CSV preview/commit and factor workflows, then verify the recovery states in tests.
+- [x] Show row-level quarantine evidence and validation errors with loading, empty, and error states.
+- [x] Show concrete correction records, including original/corrected reading references, reason, status, and timestamps.
+- [x] Add frontend recovery tests for CSV preview and commit mutation failures.
+
+### R2 — Durable Monitoring Operations
+
+- [x] Add monitored-job health targets, stale-run detection, failure retry metadata, and operational recovery records.
+- [x] Add tenant-scoped alert routing preferences, delivery attempts, acknowledgement/escalation lifecycle, and audit evidence.
+- [x] Add explicit notification delivery integration behind user-configured credentials or platform configuration, with no silent claim of external delivery before verification.
+- [x] Add monitoring-health, routing, delivery, and recovery APIs with manager/owner role controls.
+- [x] Add operational monitoring controls and delivery/recovery evidence views with loading, error, and empty states.
+- [x] Document scheduler deployment, run-key semantics, recovery, alert-routing, and no-browser dependency runbooks.
+- [x] Add deterministic tests for stale-run health, retry idempotency, routing authorization, delivery attempts, and recovery states.
+- [x] Extract and unit-test scheduled-worker health-state evaluation for disabled, healthy, stale, and failed runs.
+- [x] Add a persisted alert-escalation lifecycle with escalation policy, state/timestamps, and a bounded non-LLM escalation decision path beyond basic owner delivery.
+- [x] Add UI evidence and tests for escalation pending, triggered, suppressed, and resolved outcomes without overstating external-delivery guarantees.
+- [x] Add deterministic recovery lifecycle tests for open → retrying → resolved/failed transitions and repeat-retry idempotency.
+- [x] Add Intelligence UI tests for pending, triggered-with-action, suppressed, and resolved escalation evidence states.
+- [x] Add direct recovery persistence tests for open → retrying → resolved and retrying → failed/reopened transitions.
+- [x] Add a focused regression proving a successful matching rerun resolves only its own recovery event.

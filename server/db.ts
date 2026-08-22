@@ -3,16 +3,26 @@ import { drizzle } from "drizzle-orm/mysql2";
 import { nanoid } from "nanoid";
 import {
   auditEvents,
+  alertDeliveryAttempts,
+  alertEscalationPolicies,
+  alertEscalations,
+  alertRoutingPreferences,
   anomalyEvents,
   carbonCalculations,
+  dataImportFiles,
+  dataImportRows,
   dataQualityFindings,
   ecoScoreSnapshots,
+  emissionFactors,
   ingestionBatches,
   meters,
   monitoringAlerts,
+  monitoringRecoveryEvents,
   monitoringRuns,
+  monitoringServiceTargets,
   organizationMemberships,
   organizations,
+  readingCorrections,
   sites,
   sustainabilityReadings,
   sustainabilityActions,
@@ -23,6 +33,8 @@ import {
   users,
 } from "../drizzle/schema";
 import { ENV } from "./_core/env";
+import { evaluateScheduledMonitoringHealth } from "./domain/monitoringOperations";
+import { planRecoveryFailure, planRecoveryRetry, shouldResolveRecovery } from "./domain/recoveryLifecycle";
 
 let databaseInstance: ReturnType<typeof drizzle> | null = null;
 
@@ -265,6 +277,286 @@ export async function ingestReading(input: {
   });
 }
 
+export async function createDataImportPreview(input: {
+  organizationId: number;
+  userId: number;
+  fileName: string;
+  contentType: string;
+  storageKey: string;
+  contentHash: string;
+  idempotencyKey: string;
+  byteSize: number;
+  rows: Array<{
+    rowNumber: number;
+    rawRecord: Record<string, string>;
+    meterKey: string | null;
+    observedAt: Date | null;
+    value: number | null;
+    unit: string | null;
+    status: "valid" | "rejected";
+    validationErrors: string[];
+  }>;
+  validRows: number;
+  rejectedRows: number;
+  errorSummary: string | null;
+}) {
+  const database = await requireDb();
+  const existing = await database.select().from(dataImportFiles)
+    .where(and(eq(dataImportFiles.organizationId, input.organizationId), eq(dataImportFiles.idempotencyKey, input.idempotencyKey))).limit(1);
+  if (existing[0]) return { importFile: existing[0], idempotent: true };
+  return database.transaction(async (tx) => {
+    const [created] = await tx.insert(dataImportFiles).values({
+      organizationId: input.organizationId,
+      uploadedByUserId: input.userId,
+      fileName: input.fileName,
+      contentType: input.contentType,
+      storageKey: input.storageKey,
+      contentHash: input.contentHash,
+      idempotencyKey: input.idempotencyKey,
+      byteSize: input.byteSize,
+      status: "previewed",
+      totalRows: input.rows.length,
+      validRows: input.validRows,
+      rejectedRows: input.rejectedRows,
+      errorSummary: input.errorSummary,
+      previewedAt: new Date(),
+    }).$returningId();
+    if (input.rows.length) {
+      await tx.insert(dataImportRows).values(input.rows.map((row) => ({
+        importFileId: created.id,
+        organizationId: input.organizationId,
+        rowNumber: row.rowNumber,
+        rawRecord: row.rawRecord,
+        meterKey: row.meterKey,
+        observedAt: row.observedAt,
+        value: row.value === null ? null : row.value.toFixed(4),
+        unit: row.unit,
+        status: row.status,
+        validationErrors: row.validationErrors.length ? row.validationErrors : null,
+      })));
+    }
+    await tx.insert(auditEvents).values({
+      organizationId: input.organizationId,
+      actorUserId: input.userId,
+      eventType: "import.previewed",
+      resourceType: "data_import_file",
+      resourceId: String(created.id),
+      payload: { fileName: input.fileName, validRows: input.validRows, rejectedRows: input.rejectedRows, contentHash: input.contentHash },
+    });
+    const [importFile] = await tx.select().from(dataImportFiles).where(eq(dataImportFiles.id, created.id)).limit(1);
+    return { importFile, idempotent: false };
+  });
+}
+
+export async function listDataImportFiles(organizationId: number) {
+  const database = await requireDb();
+  return database.select().from(dataImportFiles).where(eq(dataImportFiles.organizationId, organizationId)).orderBy(desc(dataImportFiles.createdAt)).limit(25);
+}
+
+export async function getDataImportFile(organizationId: number, importFileId: number) {
+  const database = await requireDb();
+  const rows = await database.select().from(dataImportFiles)
+    .where(and(eq(dataImportFiles.organizationId, organizationId), eq(dataImportFiles.id, importFileId))).limit(1);
+  return rows[0];
+}
+
+export async function getDataImportFileByKey(organizationId: number, idempotencyKey: string) {
+  const database = await requireDb();
+  const rows = await database.select().from(dataImportFiles)
+    .where(and(eq(dataImportFiles.organizationId, organizationId), eq(dataImportFiles.idempotencyKey, idempotencyKey))).limit(1);
+  return rows[0];
+}
+
+export async function listDataImportRows(organizationId: number, importFileId: number) {
+  const database = await requireDb();
+  return database.select().from(dataImportRows)
+    .where(and(eq(dataImportRows.organizationId, organizationId), eq(dataImportRows.importFileId, importFileId)))
+    .orderBy(dataImportRows.rowNumber).limit(5_000);
+}
+
+export async function getImportLineage(organizationId: number, importFileId: number) {
+  const database = await requireDb();
+  const importFile = await getDataImportFile(organizationId, importFileId);
+  if (!importFile) return undefined;
+  const rows = await database.select({ row: dataImportRows, reading: sustainabilityReadings, meter: meters })
+    .from(dataImportRows)
+    .leftJoin(sustainabilityReadings, eq(dataImportRows.readingId, sustainabilityReadings.id))
+    .leftJoin(meters, eq(sustainabilityReadings.meterId, meters.id))
+    .where(and(eq(dataImportRows.organizationId, organizationId), eq(dataImportRows.importFileId, importFileId)))
+    .orderBy(dataImportRows.rowNumber).limit(5_000);
+  return { importFile, rows };
+}
+
+export async function getReadingLineage(organizationId: number, readingId: number) {
+  const database = await requireDb();
+  const readingRows = await database.select({ reading: sustainabilityReadings, meter: meters })
+    .from(sustainabilityReadings)
+    .innerJoin(meters, eq(sustainabilityReadings.meterId, meters.id))
+    .where(and(eq(sustainabilityReadings.organizationId, organizationId), eq(sustainabilityReadings.id, readingId))).limit(1);
+  if (!readingRows[0]) return undefined;
+  const corrections = await database.select().from(readingCorrections).where(and(
+    eq(readingCorrections.organizationId, organizationId),
+    eq(readingCorrections.originalReadingId, readingId),
+  )).orderBy(desc(readingCorrections.createdAt)).limit(25);
+  const appliedCorrection = await database.select().from(readingCorrections).where(and(
+    eq(readingCorrections.organizationId, organizationId),
+    eq(readingCorrections.correctedReadingId, readingId),
+  )).orderBy(desc(readingCorrections.createdAt)).limit(1);
+  return { ...readingRows[0], corrections, appliedCorrection: appliedCorrection[0] ?? null };
+}
+
+export async function commitDataImport(input: { organizationId: number; importFileId: number; userId: number }) {
+  const database = await requireDb();
+  const importFile = await getDataImportFile(input.organizationId, input.importFileId);
+  if (!importFile) return undefined;
+  if (importFile.ingestionBatchId) {
+    return { importFileId: importFile.id, ingestionBatchId: importFile.ingestionBatchId, acceptedRows: importFile.validRows, rejectedRows: importFile.rejectedRows, idempotent: true };
+  }
+  const importRows = await listDataImportRows(input.organizationId, input.importFileId);
+  const validRows = importRows.filter((row) => row.status === "valid" && row.meterKey && row.observedAt && row.value !== null && row.unit);
+  const meterRows = await listMeters(input.organizationId);
+  const meterByKey = new Map(meterRows.map((meter) => [meter.meterKey.toLowerCase(), meter]));
+  return database.transaction(async (tx) => {
+    const [batch] = await tx.insert(ingestionBatches).values({
+      organizationId: input.organizationId,
+      initiatedByUserId: input.userId,
+      idempotencyKey: `csv-import:${input.importFileId}`,
+      source: "csv",
+      totalRows: importRows.length,
+      acceptedRows: 0,
+      rejectedRows: importFile.rejectedRows,
+      payloadHash: importFile.contentHash,
+    }).$returningId();
+    let acceptedRows = 0;
+    for (const row of validRows) {
+      const meter = meterByKey.get(row.meterKey!.toLowerCase());
+      if (!meter) continue;
+      const [created] = await tx.insert(sustainabilityReadings).values({
+        organizationId: input.organizationId,
+        siteId: meter.siteId,
+        meterId: meter.id,
+        ingestionBatchId: batch.id,
+        observedAt: row.observedAt!,
+        value: Number(row.value).toFixed(4),
+        unit: row.unit!,
+        source: "csv",
+        sourceReference: `${importFile.fileName}#${row.rowNumber}`,
+        idempotencyKey: `csv:${input.importFileId}:${row.rowNumber}`,
+        provenance: { importFileId: input.importFileId, importRowNumber: row.rowNumber, contentHash: importFile.contentHash, simulated: false },
+      }).$returningId();
+      await tx.update(dataImportRows).set({ status: "imported", readingId: created.id }).where(eq(dataImportRows.id, row.id));
+      acceptedRows += 1;
+    }
+    const batchStatus = importFile.rejectedRows ? "completed_with_errors" : "completed";
+    await tx.update(ingestionBatches).set({ status: batchStatus, acceptedRows, rejectedRows: importFile.rejectedRows, completedAt: new Date() }).where(eq(ingestionBatches.id, batch.id));
+    await tx.update(dataImportFiles).set({ ingestionBatchId: batch.id, status: importFile.rejectedRows ? "completed_with_errors" : "committed", committedAt: new Date() }).where(eq(dataImportFiles.id, input.importFileId));
+    await tx.insert(auditEvents).values({
+      organizationId: input.organizationId,
+      actorUserId: input.userId,
+      eventType: "import.committed",
+      resourceType: "data_import_file",
+      resourceId: String(input.importFileId),
+      payload: { ingestionBatchId: batch.id, acceptedRows, rejectedRows: importFile.rejectedRows },
+    });
+    return { importFileId: input.importFileId, ingestionBatchId: batch.id, acceptedRows, rejectedRows: importFile.rejectedRows, idempotent: false };
+  });
+}
+
+export async function createEmissionFactor(input: {
+  organizationId: number;
+  resourceType: (typeof import("../drizzle/schema").resourceTypes)[number];
+  inputUnit: string;
+  emittedKgCo2ePerUnit: number;
+  scope: string;
+  geography: string;
+  methodology: string;
+  sourceName: string;
+  sourceUrl?: string;
+  factorVersion: string;
+  validFrom: Date;
+  validTo?: Date;
+  userId: number;
+}) {
+  const database = await requireDb();
+  const [created] = await database.insert(emissionFactors).values({
+    organizationId: input.organizationId,
+    resourceType: input.resourceType,
+    inputUnit: input.inputUnit,
+    emittedKgCo2ePerUnit: input.emittedKgCo2ePerUnit.toFixed(8),
+    scope: input.scope,
+    geography: input.geography,
+    methodology: input.methodology,
+    sourceName: input.sourceName,
+    sourceUrl: input.sourceUrl ?? null,
+    factorVersion: input.factorVersion,
+    validFrom: input.validFrom,
+    validTo: input.validTo ?? null,
+    status: "draft",
+    createdByUserId: input.userId,
+  }).$returningId();
+  await database.insert(auditEvents).values({ organizationId: input.organizationId, actorUserId: input.userId, eventType: "factor.created", resourceType: "emission_factor", resourceId: String(created.id), payload: { factorVersion: input.factorVersion, resourceType: input.resourceType } });
+  return created;
+}
+
+export async function approveEmissionFactor(input: { organizationId: number; factorId: number; userId: number }) {
+  const database = await requireDb();
+  const factor = await database.select().from(emissionFactors).where(and(eq(emissionFactors.organizationId, input.organizationId), eq(emissionFactors.id, input.factorId))).limit(1);
+  if (!factor[0]) return undefined;
+  const now = new Date();
+  await database.update(emissionFactors).set({ status: "approved", approvedByUserId: input.userId, approvedAt: now }).where(eq(emissionFactors.id, input.factorId));
+  await database.insert(auditEvents).values({ organizationId: input.organizationId, actorUserId: input.userId, eventType: "factor.approved", resourceType: "emission_factor", resourceId: String(input.factorId), payload: { factorVersion: factor[0].factorVersion } });
+  return { id: input.factorId, status: "approved" as const, approvedAt: now };
+}
+
+export async function listEmissionFactors(organizationId: number) {
+  const database = await requireDb();
+  return database.select().from(emissionFactors).where(eq(emissionFactors.organizationId, organizationId)).orderBy(desc(emissionFactors.validFrom)).limit(100);
+}
+
+export async function listApprovedEmissionFactors(organizationId: number) {
+  const factors = await listEmissionFactors(organizationId);
+  return factors.filter((factor) => factor.status === "approved");
+}
+
+export async function createReadingCorrection(input: { organizationId: number; originalReadingId: number; value: number; observedAt: Date; reason: string; userId: number }) {
+  const database = await requireDb();
+  const original = await database.select().from(sustainabilityReadings).where(and(
+    eq(sustainabilityReadings.organizationId, input.organizationId),
+    eq(sustainabilityReadings.id, input.originalReadingId),
+    isNull(sustainabilityReadings.supersededAt),
+  )).limit(1);
+  if (!original[0]) return undefined;
+  const source = original[0];
+  return database.transaction(async (tx) => {
+    const now = new Date();
+    const [corrected] = await tx.insert(sustainabilityReadings).values({
+      organizationId: input.organizationId,
+      siteId: source.siteId,
+      meterId: source.meterId,
+      observedAt: input.observedAt,
+      value: input.value.toFixed(4),
+      unit: source.unit,
+      source: "api",
+      sourceReference: `correction:${source.id}`,
+      idempotencyKey: `correction:${source.id}:${now.getTime()}`,
+      provenance: { correctionOfReadingId: source.id, reason: input.reason, originalSource: source.source, simulated: false },
+    }).$returningId();
+    const [correction] = await tx.insert(readingCorrections).values({
+      organizationId: input.organizationId,
+      originalReadingId: source.id,
+      correctedReadingId: corrected.id,
+      status: "approved",
+      reason: input.reason,
+      submittedByUserId: input.userId,
+      approvedByUserId: input.userId,
+      approvedAt: now,
+    }).$returningId();
+    await tx.update(sustainabilityReadings).set({ supersededAt: now }).where(eq(sustainabilityReadings.id, source.id));
+    await tx.insert(auditEvents).values({ organizationId: input.organizationId, actorUserId: input.userId, eventType: "reading.corrected", resourceType: "sustainability_reading", resourceId: String(source.id), payload: { correctionId: correction.id, correctedReadingId: corrected.id, reason: input.reason } });
+    return { correctionId: correction.id, correctedReadingId: corrected.id };
+  });
+}
+
 export async function listIngestionBatches(organizationId: number) {
   const database = await requireDb();
   return database
@@ -281,7 +573,7 @@ export async function listRecentReadings(organizationId: number) {
     .select({ reading: sustainabilityReadings, meter: meters })
     .from(sustainabilityReadings)
     .innerJoin(meters, eq(sustainabilityReadings.meterId, meters.id))
-    .where(eq(sustainabilityReadings.organizationId, organizationId))
+    .where(and(eq(sustainabilityReadings.organizationId, organizationId), isNull(sustainabilityReadings.supersededAt)))
     .orderBy(desc(sustainabilityReadings.observedAt))
     .limit(30);
 }
@@ -292,7 +584,7 @@ export async function listReadingsForMonitoring(organizationId: number) {
     .select({ reading: sustainabilityReadings, meter: meters })
     .from(sustainabilityReadings)
     .innerJoin(meters, eq(sustainabilityReadings.meterId, meters.id))
-    .where(eq(sustainabilityReadings.organizationId, organizationId))
+    .where(and(eq(sustainabilityReadings.organizationId, organizationId), isNull(sustainabilityReadings.supersededAt)))
     .orderBy(sustainabilityReadings.observedAt)
     .limit(500);
 }
@@ -308,7 +600,7 @@ export async function listUnprocessedReadingsForMonitoring(organizationId: numbe
       eq(dataQualityFindings.ruleId, "required-value"),
       eq(dataQualityFindings.evaluationVersion, evaluationVersion),
     ))
-    .where(and(eq(sustainabilityReadings.organizationId, organizationId), isNull(dataQualityFindings.id)))
+    .where(and(eq(sustainabilityReadings.organizationId, organizationId), isNull(sustainabilityReadings.supersededAt), isNull(dataQualityFindings.id)))
     .orderBy(sustainabilityReadings.observedAt)
     .limit(500);
 }
@@ -474,7 +766,8 @@ export async function createMonitoringAlertIfAbsent(input: {
 export async function listOpenAnomalySeverities(organizationId: number) {
   const database = await requireDb();
   const rows = await database.select({ severity: anomalyEvents.severity }).from(anomalyEvents)
-    .where(and(eq(anomalyEvents.organizationId, organizationId), eq(anomalyEvents.status, "open")));
+    .innerJoin(sustainabilityReadings, eq(anomalyEvents.readingId, sustainabilityReadings.id))
+    .where(and(eq(anomalyEvents.organizationId, organizationId), eq(anomalyEvents.status, "open"), isNull(sustainabilityReadings.supersededAt)));
   return rows.map((row) => row.severity);
 }
 
@@ -526,6 +819,16 @@ export async function failMonitoringRun(input: { organizationId: number; runKey:
   const database = await requireDb();
   await database.update(monitoringRuns).set({ status: "failed", errorSummary: input.errorSummary, completedAt: new Date() })
     .where(and(eq(monitoringRuns.organizationId, input.organizationId), eq(monitoringRuns.runKey, input.runKey)));
+  const retryRecovery = await database.select().from(monitoringRecoveryEvents)
+    .where(and(eq(monitoringRecoveryEvents.organizationId, input.organizationId), eq(monitoringRecoveryEvents.retryRunKey, input.runKey), eq(monitoringRecoveryEvents.status, "retrying"))).limit(1);
+  const failurePlan = planRecoveryFailure({ retryingRecoveryExists: Boolean(retryRecovery[0]), errorSummary: input.errorSummary });
+  if (failurePlan.kind === "reopen" && retryRecovery[0]) {
+    await database.update(monitoringRecoveryEvents).set({ status: "open", reason: failurePlan.reason, updatedAt: new Date() }).where(eq(monitoringRecoveryEvents.id, retryRecovery[0].id));
+    return;
+  }
+  const run = await database.select({ id: monitoringRuns.id }).from(monitoringRuns)
+    .where(and(eq(monitoringRuns.organizationId, input.organizationId), eq(monitoringRuns.runKey, input.runKey))).limit(1);
+  await openMonitoringRecovery({ organizationId: input.organizationId, monitoringRunId: run[0]?.id ?? null, reason: failurePlan.reason });
 }
 
 export async function getMonitoringStatus(organizationId: number) {
@@ -536,6 +839,189 @@ export async function getMonitoringStatus(organizationId: number) {
     database.select({ value: count() }).from(monitoringAlerts).where(and(eq(monitoringAlerts.organizationId, organizationId), eq(monitoringAlerts.status, "open"))),
   ]);
   return { latestRun: latestRun[0] ?? null, latestScore: latestScore[0] ?? null, openAlertCount: Number(openAlerts[0]?.value ?? 0) };
+}
+
+export async function upsertMonitoringServiceTarget(input: {
+  organizationId: number;
+  expectedIntervalMinutes: number;
+  staleAfterMinutes: number;
+  isEnabled: boolean;
+  userId: number;
+}) {
+  const database = await requireDb();
+  await database.insert(monitoringServiceTargets).values({
+    organizationId: input.organizationId,
+    targetKey: "scheduled-monitoring",
+    expectedIntervalMinutes: input.expectedIntervalMinutes,
+    staleAfterMinutes: input.staleAfterMinutes,
+    isEnabled: input.isEnabled,
+    createdByUserId: input.userId,
+  }).onDuplicateKeyUpdate({ set: { expectedIntervalMinutes: input.expectedIntervalMinutes, staleAfterMinutes: input.staleAfterMinutes, isEnabled: input.isEnabled, createdByUserId: input.userId, updatedAt: new Date() } });
+  await database.insert(auditEvents).values({ organizationId: input.organizationId, actorUserId: input.userId, eventType: "monitoring.target_configured", resourceType: "monitoring_service_target", resourceId: "scheduled-monitoring", payload: { expectedIntervalMinutes: input.expectedIntervalMinutes, staleAfterMinutes: input.staleAfterMinutes, isEnabled: input.isEnabled } });
+  return getMonitoringOperationalHealth(input.organizationId);
+}
+
+export async function getMonitoringOperationalHealth(organizationId: number, now = new Date()) {
+  const database = await requireDb();
+  const [targetRows, latestScheduledRun, openRecoveries] = await Promise.all([
+    database.select().from(monitoringServiceTargets).where(and(eq(monitoringServiceTargets.organizationId, organizationId), eq(monitoringServiceTargets.targetKey, "scheduled-monitoring"))).limit(1),
+    database.select().from(monitoringRuns).where(and(eq(monitoringRuns.organizationId, organizationId), eq(monitoringRuns.trigger, "scheduled"))).orderBy(desc(monitoringRuns.startedAt)).limit(1),
+    database.select().from(monitoringRecoveryEvents).where(and(eq(monitoringRecoveryEvents.organizationId, organizationId), eq(monitoringRecoveryEvents.status, "open"))).orderBy(desc(monitoringRecoveryEvents.detectedAt)).limit(20),
+  ]);
+  const target = targetRows[0] ?? null;
+  const latestRun = latestScheduledRun[0] ?? null;
+  const health = evaluateScheduledMonitoringHealth({ target, latestRun, now });
+  return { target, latestScheduledRun: latestRun, openRecoveries, ...health, checkedAt: now };
+}
+
+export async function openMonitoringRecovery(input: { organizationId: number; monitoringRunId?: number | null; reason: string }) {
+  const database = await requireDb();
+  const existing = await database.select().from(monitoringRecoveryEvents).where(and(
+    eq(monitoringRecoveryEvents.organizationId, input.organizationId),
+    eq(monitoringRecoveryEvents.status, "open"),
+    input.monitoringRunId ? eq(monitoringRecoveryEvents.monitoringRunId, input.monitoringRunId) : isNull(monitoringRecoveryEvents.monitoringRunId),
+  )).limit(1);
+  if (existing[0]) return { event: existing[0], created: false };
+  const [created] = await database.insert(monitoringRecoveryEvents).values({ organizationId: input.organizationId, monitoringRunId: input.monitoringRunId ?? null, reason: input.reason.slice(0, 500) }).$returningId();
+  const [event] = await database.select().from(monitoringRecoveryEvents).where(eq(monitoringRecoveryEvents.id, created.id)).limit(1);
+  return { event, created: true };
+}
+
+export async function markMonitoringRecoveryRetry(input: { organizationId: number; recoveryEventId: number; retryRunKey: string }) {
+  const database = await requireDb();
+  const event = await database.select().from(monitoringRecoveryEvents).where(and(eq(monitoringRecoveryEvents.organizationId, input.organizationId), eq(monitoringRecoveryEvents.id, input.recoveryEventId))).limit(1);
+  if (!event[0]) return undefined;
+  const retryPlan = planRecoveryRetry({ status: event[0].status, retryRunKey: event[0].retryRunKey, attemptCount: event[0].attemptCount, requestedRunKey: input.retryRunKey });
+  if (retryPlan.kind === "unavailable") return undefined;
+  if (retryPlan.kind === "reuse") return { id: input.recoveryEventId, status: "retrying" as const, attemptCount: retryPlan.attemptCount, retryRunKey: retryPlan.retryRunKey, started: false };
+  await database.update(monitoringRecoveryEvents).set({ status: "retrying", retryRunKey: retryPlan.retryRunKey, attemptCount: retryPlan.attemptCount, updatedAt: new Date() }).where(eq(monitoringRecoveryEvents.id, input.recoveryEventId));
+  return { id: input.recoveryEventId, status: "retrying" as const, attemptCount: retryPlan.attemptCount, retryRunKey: retryPlan.retryRunKey, started: true };
+}
+
+export async function resolveMonitoringRecoveryForRun(input: { organizationId: number; runKey: string }) {
+  const database = await requireDb();
+  const candidates = await database.select().from(monitoringRecoveryEvents)
+    .where(and(eq(monitoringRecoveryEvents.organizationId, input.organizationId), eq(monitoringRecoveryEvents.retryRunKey, input.runKey), eq(monitoringRecoveryEvents.status, "retrying")));
+  const now = new Date();
+  for (const candidate of candidates) {
+    if (shouldResolveRecovery({ status: candidate.status, retryRunKey: candidate.retryRunKey, completedRunKey: input.runKey })) {
+      await database.update(monitoringRecoveryEvents).set({ status: "resolved", resolvedAt: now, updatedAt: now }).where(eq(monitoringRecoveryEvents.id, candidate.id));
+    }
+  }
+}
+
+export async function getAlertRoutingPreference(organizationId: number) {
+  const database = await requireDb();
+  const rows = await database.select().from(alertRoutingPreferences).where(and(eq(alertRoutingPreferences.organizationId, organizationId), eq(alertRoutingPreferences.channel, "owner_notification"))).limit(1);
+  return rows[0] ?? null;
+}
+
+export async function upsertAlertRoutingPreference(input: { organizationId: number; minimumSeverity: (typeof import("../drizzle/schema").anomalySeverities)[number]; isEnabled: boolean; userId: number }) {
+  const database = await requireDb();
+  await database.insert(alertRoutingPreferences).values({ organizationId: input.organizationId, channel: "owner_notification", minimumSeverity: input.minimumSeverity, isEnabled: input.isEnabled, updatedByUserId: input.userId }).onDuplicateKeyUpdate({ set: { minimumSeverity: input.minimumSeverity, isEnabled: input.isEnabled, updatedByUserId: input.userId, updatedAt: new Date() } });
+  const preference = await getAlertRoutingPreference(input.organizationId);
+  await database.insert(auditEvents).values({ organizationId: input.organizationId, actorUserId: input.userId, eventType: "alert.routing_configured", resourceType: "alert_routing_preference", resourceId: preference ? String(preference.id) : null, payload: { channel: "owner_notification", minimumSeverity: input.minimumSeverity, isEnabled: input.isEnabled } });
+  return preference;
+}
+
+export async function getAlertForDelivery(organizationId: number, alertId: number) {
+  const database = await requireDb();
+  const rows = await database.select().from(monitoringAlerts).where(and(eq(monitoringAlerts.organizationId, organizationId), eq(monitoringAlerts.id, alertId))).limit(1);
+  return rows[0] ?? null;
+}
+
+export async function createAlertDeliveryAttempt(input: { organizationId: number; alertId: number; routingPreferenceId?: number | null; status: (typeof import("../drizzle/schema").alertDeliveryStatuses)[number]; errorSummary?: string | null; providerReference?: string | null }) {
+  const database = await requireDb();
+  const latest = await database.select({ attemptNumber: alertDeliveryAttempts.attemptNumber }).from(alertDeliveryAttempts).where(and(eq(alertDeliveryAttempts.alertId, input.alertId), eq(alertDeliveryAttempts.channel, "owner_notification"))).orderBy(desc(alertDeliveryAttempts.attemptNumber)).limit(1);
+  const attemptNumber = (latest[0]?.attemptNumber ?? 0) + 1;
+  const [created] = await database.insert(alertDeliveryAttempts).values({
+    organizationId: input.organizationId,
+    alertId: input.alertId,
+    routingPreferenceId: input.routingPreferenceId ?? null,
+    channel: "owner_notification",
+    status: input.status,
+    attemptNumber,
+    errorSummary: input.errorSummary ?? null,
+    providerReference: input.providerReference ?? null,
+    deliveredAt: input.status === "delivered" ? new Date() : null,
+  }).$returningId();
+  return created;
+}
+
+export async function listAlertDeliveryAttempts(organizationId: number) {
+  const database = await requireDb();
+  return database.select({ attempt: alertDeliveryAttempts, alert: monitoringAlerts }).from(alertDeliveryAttempts)
+    .innerJoin(monitoringAlerts, eq(alertDeliveryAttempts.alertId, monitoringAlerts.id))
+    .where(eq(alertDeliveryAttempts.organizationId, organizationId)).orderBy(desc(alertDeliveryAttempts.requestedAt)).limit(50);
+}
+
+const escalationSeverityRank = { low: 1, medium: 2, high: 3, critical: 4 } as const;
+
+export async function getAlertEscalationPolicy(organizationId: number) {
+  const database = await requireDb();
+  const rows = await database.select().from(alertEscalationPolicies).where(eq(alertEscalationPolicies.organizationId, organizationId)).limit(1);
+  return rows[0] ?? null;
+}
+
+export async function upsertAlertEscalationPolicy(input: { organizationId: number; minimumSeverity: (typeof import("../drizzle/schema").anomalySeverities)[number]; afterMinutes: number; isEnabled: boolean; userId: number }) {
+  const database = await requireDb();
+  await database.insert(alertEscalationPolicies).values({ organizationId: input.organizationId, minimumSeverity: input.minimumSeverity, afterMinutes: input.afterMinutes, isEnabled: input.isEnabled, updatedByUserId: input.userId }).onDuplicateKeyUpdate({ set: { minimumSeverity: input.minimumSeverity, afterMinutes: input.afterMinutes, isEnabled: input.isEnabled, updatedByUserId: input.userId, updatedAt: new Date() } });
+  const policy = await getAlertEscalationPolicy(input.organizationId);
+  await database.insert(auditEvents).values({ organizationId: input.organizationId, actorUserId: input.userId, eventType: "alert.escalation_configured", resourceType: "alert_escalation_policy", resourceId: policy ? String(policy.id) : null, payload: { minimumSeverity: input.minimumSeverity, afterMinutes: input.afterMinutes, isEnabled: input.isEnabled } });
+  return policy;
+}
+
+export async function listAlertEscalations(organizationId: number) {
+  const database = await requireDb();
+  return database.select({ escalation: alertEscalations, alert: monitoringAlerts, action: sustainabilityActions }).from(alertEscalations)
+    .innerJoin(monitoringAlerts, eq(alertEscalations.alertId, monitoringAlerts.id))
+    .leftJoin(sustainabilityActions, eq(alertEscalations.actionId, sustainabilityActions.id))
+    .where(eq(alertEscalations.organizationId, organizationId)).orderBy(desc(alertEscalations.createdAt)).limit(50);
+}
+
+export async function evaluateAlertEscalations(organizationId: number, now = new Date()) {
+  const database = await requireDb();
+  const policy = await getAlertEscalationPolicy(organizationId);
+  if (!policy || !policy.isEnabled) return { policy, pendingCreated: 0, triggered: 0, suppressed: 0 };
+  const [openAlerts, existing] = await Promise.all([
+    database.select().from(monitoringAlerts).where(and(eq(monitoringAlerts.organizationId, organizationId), eq(monitoringAlerts.status, "open"))).orderBy(desc(monitoringAlerts.createdAt)).limit(100),
+    database.select().from(alertEscalations).where(eq(alertEscalations.organizationId, organizationId)).limit(100),
+  ]);
+  const byAlertId = new Map(existing.map((item) => [item.alertId, item]));
+  let pendingCreated = 0;
+  let triggered = 0;
+  let suppressed = 0;
+  for (const alert of openAlerts) {
+    let escalation = byAlertId.get(alert.id);
+    if (!escalation) {
+      const qualifies = escalationSeverityRank[alert.severity] >= escalationSeverityRank[policy.minimumSeverity];
+      const dueAt = new Date(alert.createdAt.getTime() + policy.afterMinutes * 60_000);
+      const [created] = await database.insert(alertEscalations).values({ organizationId, alertId: alert.id, policyId: policy.id, dueAt, status: qualifies ? "pending" : "suppressed", reason: qualifies ? `Awaiting ${policy.afterMinutes}-minute escalation threshold.` : `Severity ${alert.severity} is below escalation threshold ${policy.minimumSeverity}.` }).$returningId();
+      const [createdEscalation] = await database.select().from(alertEscalations).where(eq(alertEscalations.id, created.id)).limit(1);
+      escalation = createdEscalation;
+      if (qualifies) pendingCreated += 1; else suppressed += 1;
+    }
+    if (escalation?.status === "pending" && escalation.dueAt <= now) {
+      const [action] = await database.insert(sustainabilityActions).values({
+        organizationId,
+        title: `Escalated monitoring alert: ${alert.title}`.slice(0, 180),
+        description: `Created by deterministic escalation policy after alert #${alert.id} remained open beyond ${policy.afterMinutes} minutes. Severity: ${alert.severity}. Evidence: ${alert.message}`,
+        source: "monitoring_escalation",
+        priority: alert.severity,
+      }).$returningId();
+      await database.update(alertEscalations).set({ status: "triggered", actionId: action.id, triggeredAt: now, updatedAt: now }).where(eq(alertEscalations.id, escalation.id));
+      await database.insert(auditEvents).values({ organizationId, eventType: "alert.escalated", resourceType: "alert_escalation", resourceId: String(escalation.id), payload: { alertId: alert.id, actionId: action.id, policyId: policy.id } });
+      triggered += 1;
+    }
+  }
+  return { policy, pendingCreated, triggered, suppressed };
+}
+
+export async function resolveAlertEscalation(input: { organizationId: number; alertId: number; resolvedAt?: Date }) {
+  const database = await requireDb();
+  const resolvedAt = input.resolvedAt ?? new Date();
+  await database.update(alertEscalations).set({ status: "resolved", resolvedAt, updatedAt: resolvedAt })
+    .where(and(eq(alertEscalations.organizationId, input.organizationId), eq(alertEscalations.alertId, input.alertId), eq(alertEscalations.status, "pending")));
 }
 
 export async function listEcoScoreHistory(organizationId: number, limit = 30) {
@@ -600,6 +1086,8 @@ export async function acknowledgeMonitoringAlert(input: { organizationId: number
       .where(eq(monitoringAlerts.id, input.alertId));
     await tx.update(anomalyEvents).set({ status: "acknowledged", acknowledgedAt: now })
       .where(eq(anomalyEvents.id, alert[0].anomalyId));
+    await tx.update(alertEscalations).set({ status: "resolved", resolvedAt: now, updatedAt: now })
+      .where(and(eq(alertEscalations.organizationId, input.organizationId), eq(alertEscalations.alertId, input.alertId), eq(alertEscalations.status, "pending")));
     await tx.insert(auditEvents).values({
       organizationId: input.organizationId,
       actorUserId: input.userId,

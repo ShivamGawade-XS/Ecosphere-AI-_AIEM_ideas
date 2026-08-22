@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const testApi = vi.hoisted(() => ({
   organizationsMine: vi.fn(), overview: vi.fn(), recentReadings: vi.fn(), actionList: vi.fn(), siteList: vi.fn(), meterList: vi.fn(),
-  intelligenceReadiness: vi.fn(), monitoringOverview: vi.fn(), monitoringStatus: vi.fn(), reportsSummary: vi.fn(), scenarioList: vi.fn(), invalidate: vi.fn().mockResolvedValue(undefined),
+  intelligenceReadiness: vi.fn(), monitoringOverview: vi.fn(), monitoringStatus: vi.fn(), monitoringHealth: vi.fn(), alertRouting: vi.fn(), deliveryAttempts: vi.fn(), escalationPolicy: vi.fn(), escalations: vi.fn(), reportsSummary: vi.fn(), scenarioList: vi.fn(), invalidate: vi.fn().mockResolvedValue(undefined),
   actionCreateMode: "success" as "success" | "error", scenarioPreviewMode: "success" as "success" | "error", scenarioSaveMode: "success" as "success" | "error",
   scenarioPreviewData: undefined as unknown,
 }));
@@ -14,7 +14,7 @@ vi.mock("@/lib/trpc", () => ({
   trpc: {
     useUtils: () => ({
       organizations: { mine: { invalidate: testApi.invalidate } }, sites: { list: { invalidate: testApi.invalidate } }, meters: { list: { invalidate: testApi.invalidate } },
-      actions: { list: { invalidate: testApi.invalidate } }, scenarios: { list: { invalidate: testApi.invalidate } }, analytics: { overview: { invalidate: testApi.invalidate } }, monitoring: { status: { invalidate: testApi.invalidate } }, intelligence: { readiness: { invalidate: testApi.invalidate } },
+      actions: { list: { invalidate: testApi.invalidate } }, scenarios: { list: { invalidate: testApi.invalidate } }, analytics: { overview: { invalidate: testApi.invalidate } }, monitoring: { status: { invalidate: testApi.invalidate }, health: { invalidate: testApi.invalidate } }, alertRouting: { get: { invalidate: testApi.invalidate }, deliveries: { invalidate: testApi.invalidate } }, alertEscalation: { get: { invalidate: testApi.invalidate }, list: { invalidate: testApi.invalidate } }, intelligence: { readiness: { invalidate: testApi.invalidate } },
     }),
     organizations: { mine: { useQuery: () => testApi.organizationsMine() }, create: { useMutation: () => ({ isPending: false, mutate: vi.fn() }) } },
     operations: { overview: { useQuery: () => testApi.overview() } },
@@ -22,7 +22,9 @@ vi.mock("@/lib/trpc", () => ({
     sites: { list: { useQuery: () => testApi.siteList() }, create: { useMutation: () => ({ isPending: false, mutate: vi.fn() }) } },
     meters: { list: { useQuery: () => testApi.meterList() }, create: { useMutation: () => ({ isPending: false, mutate: vi.fn() }) } },
     intelligence: { readiness: { useQuery: () => testApi.intelligenceReadiness() } },
-    monitoring: { status: { useQuery: () => testApi.monitoringStatus() }, runOnce: { useMutation: () => ({ isPending: false, mutate: vi.fn(), data: undefined, error: null }) } },
+    monitoring: { status: { useQuery: () => testApi.monitoringStatus() }, health: { useQuery: () => testApi.monitoringHealth() }, runOnce: { useMutation: () => ({ isPending: false, mutate: vi.fn(), data: undefined, error: null }) }, configureTarget: { useMutation: () => ({ isPending: false, mutate: vi.fn(), error: null }) }, retryRecovery: { useMutation: () => ({ isPending: false, mutate: vi.fn(), error: null }) } },
+    alertRouting: { get: { useQuery: () => testApi.alertRouting() }, deliveries: { useQuery: () => testApi.deliveryAttempts() }, update: { useMutation: () => ({ isPending: false, mutate: vi.fn(), error: null }) } },
+    alertEscalation: { get: { useQuery: () => testApi.escalationPolicy() }, list: { useQuery: () => testApi.escalations() }, update: { useMutation: () => ({ isPending: false, mutate: vi.fn(), error: null }) }, evaluateNow: { useMutation: () => ({ isPending: false, mutate: vi.fn(), error: null }) } },
     analytics: { overview: { useQuery: () => testApi.monitoringOverview() } },
     alerts: { acknowledge: { useMutation: () => ({ isPending: false, mutate: vi.fn() }) } },
     actions: { list: { useQuery: () => testApi.actionList() }, create: { useMutation: (options?: { onSuccess?: () => void; onError?: () => void }) => ({ isPending: false, mutate: () => testApi.actionCreateMode === "error" ? options?.onError?.() : options?.onSuccess?.() }) }, updateStatus: { useMutation: () => ({ isPending: false, mutate: vi.fn() }) } },
@@ -52,6 +54,11 @@ describe("authenticated ecosystem workspaces", () => {
     testApi.intelligenceReadiness.mockReturnValue(query({ overview: { meterCount: 2, readingCount: 3 }, pipeline: [{ id: "registry", label: "Meter registry", state: "ready", evidence: "2 registered meters" }, { id: "analytics", label: "Anomaly and forecast worker", state: "planned", evidence: "Requires durable scheduling." }] }));
     testApi.monitoringStatus.mockReturnValue(query({ latestRun: null, latestScore: null, openAlertCount: 0 }));
     testApi.monitoringOverview.mockReturnValue(query({ status: { latestRun: null, latestScore: null, openAlertCount: 0 }, alerts: [], anomalies: [], qualityFindings: [], qualityWarnings: 0, qualityFailures: 0, carbonTotals: { totalKgCo2e: 0, calculationCount: 0, factorLabel: "pilot" } }));
+    testApi.monitoringHealth.mockReturnValue(query({ state: "not_enabled", target: null, latestScheduledRun: null, openRecoveries: [], ageMinutes: null }));
+    testApi.alertRouting.mockReturnValue(query(null));
+    testApi.deliveryAttempts.mockReturnValue(query([]));
+    testApi.escalationPolicy.mockReturnValue(query(null));
+    testApi.escalations.mockReturnValue(query([]));
     testApi.reportsSummary.mockReturnValue(query({ overview: { siteCount: 1, meterCount: 2, readingCount: 3, actionCount: 1, activeActionCount: 1 }, recentBatches: [] }));
     testApi.scenarioList.mockReturnValue(query([]));
     testApi.actionCreateMode = "success"; testApi.scenarioPreviewMode = "success"; testApi.scenarioSaveMode = "success"; testApi.scenarioPreviewData = undefined;
@@ -78,6 +85,7 @@ describe("authenticated ecosystem workspaces", () => {
     unmount();
     render(<IntelligenceWorkspace />);
     expect(screen.getByText("Anomaly and forecast worker")).toBeTruthy();
+    expect(screen.getByText("Create accountable work after an open-alert threshold")).toBeTruthy();
     cleanup();
     render(<ActionsWorkspace />);
     expect(screen.getByRole("heading", { name: "Turn a signal into accountable work." })).toBeTruthy();
@@ -106,6 +114,22 @@ describe("authenticated ecosystem workspaces", () => {
     testApi.scenarioList.mockReturnValue({ ...query(undefined), error: new Error("network") });
     render(<ScenarioWorkspace />);
     expect(screen.getByText("Scenario records could not be loaded.")).toBeTruthy();
+  });
+
+  it("renders pending, triggered, suppressed, and resolved escalation evidence without claiming external delivery", () => {
+    const dueAt = new Date("2026-08-22T08:00:00.000Z");
+    testApi.escalations.mockReturnValue(query([
+      { escalation: { id: 1, status: "pending", dueAt, reason: "Awaiting threshold." }, alert: { title: "Pending HVAC signal" }, action: null },
+      { escalation: { id: 2, status: "triggered", dueAt, reason: "Threshold reached." }, alert: { title: "Triggered HVAC signal" }, action: { id: 77, title: "Escalated monitoring alert" } },
+      { escalation: { id: 3, status: "suppressed", dueAt, reason: "Below policy threshold." }, alert: { title: "Suppressed water signal" }, action: null },
+      { escalation: { id: 4, status: "resolved", dueAt, reason: "Acknowledged before trigger." }, alert: { title: "Resolved waste signal" }, action: null },
+    ]));
+    render(<IntelligenceWorkspace />);
+    expect(screen.getByText("PENDING · due 8/22/2026, 8:00:00 AM")).toBeTruthy();
+    expect(screen.getByText("TRIGGERED · due 8/22/2026, 8:00:00 AM")).toBeTruthy();
+    expect(screen.getByText(/Action #77: Escalated monitoring alert/)).toBeTruthy();
+    expect(screen.getByText("SUPPRESSED · due 8/22/2026, 8:00:00 AM")).toBeTruthy();
+    expect(screen.getByText("RESOLVED · due 8/22/2026, 8:00:00 AM")).toBeTruthy();
   });
 
   it("covers loading and mutation feedback without concealing server outcomes", async () => {

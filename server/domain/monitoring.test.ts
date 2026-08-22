@@ -30,6 +30,14 @@ describe("deterministic monitoring domain", () => {
     expect(calculateCarbonForReading({ resourceType: "water", value: 100 })).toBeNull();
   });
 
+  it("uses an approved governed factor when one is supplied by the monitoring worker", () => {
+    expect(calculateCarbonForReading({
+      resourceType: "energy",
+      value: 100,
+      factor: { emittedKgCo2ePerUnit: 0.71, factorVersion: "goa-electricity-2026-v1", calculationVersion: "factor-library-carbon-v1" },
+    })).toMatchObject({ emittedKgCo2e: 71, emissionFactor: 0.71, factorVersion: "goa-electricity-2026-v1", calculationVersion: "factor-library-carbon-v1" });
+  });
+
   it("calculates a traceable EcoScore penalty composition", () => {
     expect(calculateEcoScore({
       qualityStatuses: ["failed", "warning"],

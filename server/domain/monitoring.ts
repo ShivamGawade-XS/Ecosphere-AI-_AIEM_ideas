@@ -105,13 +105,18 @@ export function detectReadingAnomaly(input: { observedValue: number; history: nu
   };
 }
 
-export function calculateCarbonForReading(input: { resourceType: ResourceType; value: number }) {
+export function calculateCarbonForReading(input: {
+  resourceType: ResourceType;
+  value: number;
+  factor?: { emittedKgCo2ePerUnit: number; factorVersion: string; calculationVersion?: string };
+}) {
   if (input.resourceType !== "energy") return null;
+  const emissionFactor = input.factor?.emittedKgCo2ePerUnit ?? PILOT_ELECTRICITY_FACTOR_KG_CO2E_PER_KWH;
   return {
-    emittedKgCo2e: round(input.value * PILOT_ELECTRICITY_FACTOR_KG_CO2E_PER_KWH),
-    emissionFactor: PILOT_ELECTRICITY_FACTOR_KG_CO2E_PER_KWH,
-    factorVersion: "pilot-electricity-factor-v1",
-    calculationVersion: CARBON_CALCULATION_VERSION,
+    emittedKgCo2e: round(input.value * emissionFactor),
+    emissionFactor,
+    factorVersion: input.factor?.factorVersion ?? "pilot-electricity-factor-v1",
+    calculationVersion: input.factor?.calculationVersion ?? CARBON_CALCULATION_VERSION,
   };
 }
 

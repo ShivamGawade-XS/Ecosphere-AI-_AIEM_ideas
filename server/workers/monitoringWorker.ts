@@ -1,4 +1,5 @@
 import * as db from "../db";
+import { deliverOwnerNotificationForAlert } from "../monitoring/alertDelivery";
 import {
   ANOMALY_DETECTOR_VERSION,
   DATA_QUALITY_VERSION,
@@ -26,6 +27,18 @@ export type MonitoringRunSummary = {
 
 function alertMessage(input: { meterName: string; observedValue: number; baselineMean: number; zScore: number }) {
   return `${input.meterName} recorded ${input.observedValue.toFixed(4)} against a rolling baseline of ${input.baselineMean.toFixed(4)} (z-score ${input.zScore.toFixed(2)}).`;
+}
+
+function resolveApprovedFactor(input: {
+  factors: Awaited<ReturnType<typeof db.listApprovedEmissionFactors>>;
+  resourceType: string;
+  unit: string;
+  observedAt: Date;
+}) {
+  return input.factors
+    .filter((factor) => factor.resourceType === input.resourceType && factor.inputUnit.toLowerCase() === input.unit.toLowerCase())
+    .filter((factor) => factor.validFrom.getTime() <= input.observedAt.getTime() && (!factor.validTo || factor.validTo.getTime() >= input.observedAt.getTime()))
+    .sort((left, right) => right.validFrom.getTime() - left.validFrom.getTime())[0] ?? null;
 }
 
 export async function runMonitoringForOrganization(input: {
@@ -57,9 +70,10 @@ export async function runMonitoringForOrganization(input: {
   }
 
   try {
-    const [readings, pendingReadings] = await Promise.all([
+    const [readings, pendingReadings, approvedFactors] = await Promise.all([
       db.listReadingsForMonitoring(input.organizationId),
       db.listUnprocessedReadingsForMonitoring(input.organizationId, DATA_QUALITY_VERSION),
+      db.listApprovedEmissionFactors(input.organizationId),
     ]);
     const pendingReadingIds = new Set(pendingReadings.map((item) => item.reading.id));
     const histories = new Map<number, number[]>();
@@ -122,13 +136,21 @@ export async function runMonitoringForOrganization(input: {
                 message: alertMessage({ meterName: item.meter.displayName, observedValue: value, baselineMean: anomaly.baselineMean, zScore: anomaly.zScore }),
               });
               alertsCreated += alertResult.created ? 1 : 0;
+              if (alertResult.created) {
+                await deliverOwnerNotificationForAlert({ organizationId: input.organizationId, alertId: alertResult.alertId });
+              }
             }
           }
         }
       }
 
       if (isEligibleForAnalytics) {
-        const carbon = calculateCarbonForReading({ resourceType: item.meter.resourceType, value });
+        const factor = resolveApprovedFactor({ factors: approvedFactors, resourceType: item.meter.resourceType, unit: item.reading.unit, observedAt: item.reading.observedAt });
+        const carbon = calculateCarbonForReading({
+          resourceType: item.meter.resourceType,
+          value,
+          factor: factor ? { emittedKgCo2ePerUnit: Number(factor.emittedKgCo2ePerUnit), factorVersion: factor.factorVersion, calculationVersion: "factor-library-carbon-v1" } : undefined,
+        });
         if (carbon) {
           if (isPending) {
             await db.upsertCarbonCalculation({
@@ -160,6 +182,7 @@ export async function runMonitoringForOrganization(input: {
       windowStart: readings[0]?.reading.observedAt ?? null,
       windowEnd: readings[readings.length - 1]?.reading.observedAt ?? null,
     });
+    await db.evaluateAlertEscalations(input.organizationId);
 
     const summary: MonitoringRunSummary = {
       organizationId: input.organizationId,
@@ -173,6 +196,7 @@ export async function runMonitoringForOrganization(input: {
       latestEcoScore: ecoScore.score,
     };
     await db.completeMonitoringRun({ ...summary, summary });
+    await db.resolveMonitoringRecoveryForRun({ organizationId: input.organizationId, runKey: input.runKey });
     return summary;
   } catch (error) {
     const errorSummary = error instanceof Error ? error.message : "Unknown monitoring error";

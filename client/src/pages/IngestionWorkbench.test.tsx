@@ -8,23 +8,36 @@ const queryMocks = {
   sitesList: vi.fn(),
   metersList: vi.fn(),
   batchesRecent: vi.fn(),
+  importsList: vi.fn(),
+  factorsList: vi.fn(),
+  readingsRecent: vi.fn(),
+  importLineage: vi.fn(),
+  readingLineage: vi.fn(),
 };
 const mutationMocks = {
   createOrganization: vi.fn(),
   createSite: vi.fn(),
   createMeter: vi.fn(),
   ingestReading: vi.fn(),
+  previewCsv: vi.fn(),
+  commitCsv: vi.fn(),
+  createFactor: vi.fn(),
+  approveFactor: vi.fn(),
+  correctReading: vi.fn(),
 };
 const invalidate = vi.fn().mockResolvedValue(undefined);
 
 vi.mock("@/lib/trpc", () => ({
   trpc: {
-    useUtils: () => ({ organizations: { mine: { invalidate } }, sites: { list: { invalidate } }, meters: { list: { invalidate } }, ingestion: { recent: { invalidate } } }),
+    useUtils: () => ({ organizations: { mine: { invalidate } }, sites: { list: { invalidate } }, meters: { list: { invalidate } }, ingestion: { recent: { invalidate } }, readings: { recent: { invalidate } }, imports: { list: { invalidate } }, factors: { list: { invalidate } } }),
     organizations: { mine: { useQuery: () => queryMocks.organizationsMine() }, create: { useMutation: (options: unknown) => mutationMocks.createOrganization(options) } },
     sites: { list: { useQuery: () => queryMocks.sitesList() }, create: { useMutation: (options: unknown) => mutationMocks.createSite(options) } },
     meters: { list: { useQuery: () => queryMocks.metersList() }, create: { useMutation: (options: unknown) => mutationMocks.createMeter(options) } },
-    readings: { ingest: { useMutation: (options: unknown) => mutationMocks.ingestReading(options) } },
+    readings: { ingest: { useMutation: (options: unknown) => mutationMocks.ingestReading(options) }, recent: { useQuery: () => queryMocks.readingsRecent() }, correct: { useMutation: (options: unknown) => mutationMocks.correctReading(options) } },
     ingestion: { recent: { useQuery: () => queryMocks.batchesRecent() } },
+    imports: { list: { useQuery: () => queryMocks.importsList() }, preview: { useMutation: (options: unknown) => mutationMocks.previewCsv(options) }, commit: { useMutation: (options: unknown) => mutationMocks.commitCsv(options) } },
+    factors: { list: { useQuery: () => queryMocks.factorsList() }, create: { useMutation: (options: unknown) => mutationMocks.createFactor(options) }, approve: { useMutation: (options: unknown) => mutationMocks.approveFactor(options) } },
+    lineage: { importFile: { useQuery: () => queryMocks.importLineage() }, reading: { useQuery: () => queryMocks.readingLineage() } },
   },
 }));
 
@@ -46,10 +59,20 @@ describe("IngestionWorkbench", () => {
     queryMocks.sitesList.mockReturnValue({ data: [], isLoading: false, error: null });
     queryMocks.metersList.mockReturnValue({ data: [], isLoading: false, error: null });
     queryMocks.batchesRecent.mockReturnValue({ data: [], isLoading: false, error: null });
+    queryMocks.importsList.mockReturnValue({ data: [], isLoading: false, error: null });
+    queryMocks.factorsList.mockReturnValue({ data: [], isLoading: false, error: null });
+    queryMocks.readingsRecent.mockReturnValue({ data: [], isLoading: false, error: null });
+    queryMocks.importLineage.mockReturnValue({ data: undefined, isLoading: false, isError: false, error: null });
+    queryMocks.readingLineage.mockReturnValue({ data: undefined, isLoading: false, isError: false, error: null });
     mutationMocks.createOrganization.mockImplementation(mutation({ id: 8 }));
     mutationMocks.createSite.mockImplementation(mutation({ id: 13 }));
     mutationMocks.createMeter.mockImplementation(mutation({ id: 44 }));
     mutationMocks.ingestReading.mockImplementation(mutation({ reading: { id: 99 }, idempotent: false }));
+    mutationMocks.previewCsv.mockImplementation(mutation({ importFile: { id: 21, fileName: "readings.csv", validRows: 2, rejectedRows: 1 }, idempotent: false, previewRows: [] }));
+    mutationMocks.commitCsv.mockImplementation(mutation({ importFileId: 21, ingestionBatchId: 3, acceptedRows: 2, rejectedRows: 1, idempotent: false }));
+    mutationMocks.createFactor.mockImplementation(mutation({ id: 31 }));
+    mutationMocks.approveFactor.mockImplementation(mutation({ id: 31, status: "approved" }));
+    mutationMocks.correctReading.mockImplementation(mutation({ correctionId: 41, correctedReadingId: 101 }));
   });
 
   it("renders the registry-to-reading workflow with ingestion safely disabled before a meter exists", () => {
@@ -118,5 +141,47 @@ describe("IngestionWorkbench", () => {
 
     expect(submitted).toMatchObject({ source: "simulated", provenance: { simulated: true, label: "AIEM pilot verification fixture — simulated" } });
     expect(await screen.findByText("Simulated pilot reading accepted and visibly labeled in provenance.")).toBeTruthy();
+  });
+
+  it("renders the protected CSV evidence workflow with an explicit quarantine boundary", () => {
+    render(<IngestionWorkbench />);
+    expect(screen.getByRole("heading", { name: "Preview, quarantine, then commit" })).toBeTruthy();
+    expect(screen.getByText(/Rejected rows remain quarantined and never enter monitoring/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Preview CSV evidence" }).hasAttribute("disabled")).toBe(true);
+  });
+
+  it("surfaces governed-factor mutation errors as recoverable operational feedback", async () => {
+    queryMocks.organizationsMine.mockReturnValue({ data: [{ organization: { id: 8 } }], isLoading: false, error: null });
+    mutationMocks.createFactor.mockImplementation((options: { onError?: (error: Error) => void }) => ({ isPending: false, mutate: () => options.onError?.(new Error("A manager must use a distinct approved source version.")) }));
+    render(<IngestionWorkbench />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Save factor draft" }));
+    expect(await screen.findByText("A manager must use a distinct approved source version.")).toBeTruthy();
+  });
+
+  it("surfaces CSV preview failures without silently accepting a source file", async () => {
+    queryMocks.organizationsMine.mockReturnValue({ data: [{ organization: { id: 8 } }], isLoading: false, error: null });
+    mutationMocks.previewCsv.mockImplementation((options: { onError?: (error: Error) => void }) => ({ isPending: false, mutate: () => options.onError?.(new Error("CSV headers do not match the required source contract.")) }));
+    render(<IngestionWorkbench />);
+    const file = { name: "invalid.csv", text: async () => "value\n100" } as unknown as File;
+    const fileInput = screen.getByLabelText("CSV source file");
+    fireEvent.change(fileInput, { target: { files: [file] } });
+    fireEvent.submit(fileInput.closest("form")!);
+    expect(await screen.findByText("CSV preview failed: CSV headers do not match the required source contract.")).toBeTruthy();
+  });
+
+  it("surfaces CSV commit failures while retaining the validated preview for recovery", async () => {
+    queryMocks.organizationsMine.mockReturnValue({ data: [{ organization: { id: 8 } }], isLoading: false, error: null });
+    mutationMocks.commitCsv.mockImplementation((options: { onError?: (error: Error) => void }) => ({ isPending: false, mutate: () => options.onError?.(new Error("Import batch is unavailable; refresh the source-file evidence.")) }));
+    render(<IngestionWorkbench />);
+    const file = { name: "readings.csv", text: async () => "meterKey,observedAt,value,unit\nhvac-main,2026-08-22T00:00:00.000Z,100,kWh" } as unknown as File;
+    const fileInput = screen.getByLabelText("CSV source file");
+    fireEvent.change(fileInput, { target: { files: [file] } });
+    fireEvent.submit(fileInput.closest("form")!);
+    expect(await screen.findByRole("button", { name: "Commit valid rows" })).toBeTruthy();
+    expect(screen.getByText("readings.csv")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Commit valid rows" }));
+    expect(await screen.findByText("CSV commit failed: Import batch is unavailable; refresh the source-file evidence.")).toBeTruthy();
+    expect(screen.getByText("readings.csv")).toBeTruthy();
   });
 });

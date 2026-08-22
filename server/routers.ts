@@ -1,6 +1,7 @@
 import { TRPCError } from "@trpc/server";
+import { createHash } from "node:crypto";
 import { z } from "zod";
-import { actionPriorities, actionStatuses, readingSources, resourceTypes } from "../drizzle/schema";
+import { actionPriorities, actionStatuses, anomalySeverities, readingSources, resourceTypes } from "../drizzle/schema";
 import * as db from "./db";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
@@ -8,8 +9,11 @@ import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
 import { COOKIE_NAME } from "../shared/const";
 import { calculateScenario, SCENARIO_CALCULATION_VERSION } from "./domain/scenarios";
 import { runMonitoringForOrganization } from "./workers/monitoringWorker";
+import { previewCsvImport, MAX_CSV_BYTES } from "./domain/csvImport";
+import { storagePut } from "./storage";
 
 const mutableRoles = ["owner", "manager", "operator"] as const;
+const governanceRoles = ["owner", "manager"] as const;
 const scenarioAssumptionsSchema = z.object({
   baselineEnergyKwh: z.number().finite().nonnegative().max(999_999_999),
   baselineWaterM3: z.number().finite().nonnegative().max(999_999_999),
@@ -140,6 +144,20 @@ export const appRouter = router({
         await requireOrganizationRole(ctx.user.id, input.organizationId);
         return db.listRecentReadings(input.organizationId);
       }),
+    correct: protectedProcedure
+      .input(z.object({
+        organizationId: z.number().int().positive(),
+        originalReadingId: z.number().int().positive(),
+        observedAt: z.date(),
+        value: z.number().finite().nonnegative().max(999_999_999),
+        reason: z.string().trim().min(8).max(500),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        await requireOrganizationRole(ctx.user.id, input.organizationId, governanceRoles);
+        const result = await db.createReadingCorrection({ ...input, userId: ctx.user.id });
+        if (!result) throw new TRPCError({ code: "NOT_FOUND", message: "Active source reading not found in this organization." });
+        return result;
+      }),
   }),
 
   ingestion: router({
@@ -148,6 +166,120 @@ export const appRouter = router({
       .query(async ({ ctx, input }) => {
         await requireOrganizationRole(ctx.user.id, input.organizationId);
         return db.listIngestionBatches(input.organizationId);
+      }),
+  }),
+
+  imports: router({
+    preview: protectedProcedure
+      .input(z.object({
+        organizationId: z.number().int().positive(),
+        fileName: z.string().trim().min(1).max(255),
+        csvText: z.string().min(1).max(MAX_CSV_BYTES),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        await requireOrganizationRole(ctx.user.id, input.organizationId, mutableRoles);
+        const contentHash = createHash("sha256").update(input.csvText, "utf8").digest("hex");
+        const idempotencyKey = `csv-preview:${contentHash}`;
+        const existing = await db.getDataImportFileByKey(input.organizationId, idempotencyKey);
+        if (existing) {
+          return { importFile: existing, idempotent: true, previewRows: await db.listDataImportRows(input.organizationId, existing.id) };
+        }
+        const meters = await db.listMeters(input.organizationId);
+        const preview = previewCsvImport({ csvText: input.csvText, meters });
+        const safeFileName = input.fileName.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 180) || "import.csv";
+        const stored = await storagePut(`${input.organizationId}/imports/${contentHash}-${safeFileName}`, input.csvText, "text/csv; charset=utf-8");
+        const result = await db.createDataImportPreview({
+          organizationId: input.organizationId,
+          userId: ctx.user.id,
+          fileName: safeFileName,
+          contentType: "text/csv",
+          storageKey: stored.key,
+          contentHash,
+          idempotencyKey,
+          byteSize: Buffer.byteLength(input.csvText, "utf8"),
+          rows: preview.rows,
+          validRows: preview.validRows,
+          rejectedRows: preview.rejectedRows,
+          errorSummary: preview.errorSummary,
+        });
+        return { ...result, previewRows: preview.rows.slice(0, 100) };
+      }),
+    list: protectedProcedure
+      .input(z.object({ organizationId: z.number().int().positive() }))
+      .query(async ({ ctx, input }) => {
+        await requireOrganizationRole(ctx.user.id, input.organizationId);
+        return db.listDataImportFiles(input.organizationId);
+      }),
+    rows: protectedProcedure
+      .input(z.object({ organizationId: z.number().int().positive(), importFileId: z.number().int().positive() }))
+      .query(async ({ ctx, input }) => {
+        await requireOrganizationRole(ctx.user.id, input.organizationId);
+        const importFile = await db.getDataImportFile(input.organizationId, input.importFileId);
+        if (!importFile) throw new TRPCError({ code: "NOT_FOUND", message: "Import file not found in this organization." });
+        return db.listDataImportRows(input.organizationId, input.importFileId);
+      }),
+    commit: protectedProcedure
+      .input(z.object({ organizationId: z.number().int().positive(), importFileId: z.number().int().positive() }))
+      .mutation(async ({ ctx, input }) => {
+        await requireOrganizationRole(ctx.user.id, input.organizationId, mutableRoles);
+        const result = await db.commitDataImport({ ...input, userId: ctx.user.id });
+        if (!result) throw new TRPCError({ code: "NOT_FOUND", message: "Import file not found in this organization." });
+        return result;
+      }),
+  }),
+
+  factors: router({
+    list: protectedProcedure
+      .input(z.object({ organizationId: z.number().int().positive() }))
+      .query(async ({ ctx, input }) => {
+        await requireOrganizationRole(ctx.user.id, input.organizationId);
+        return db.listEmissionFactors(input.organizationId);
+      }),
+    create: protectedProcedure
+      .input(z.object({
+        organizationId: z.number().int().positive(),
+        resourceType: z.enum(resourceTypes),
+        inputUnit: z.string().trim().min(1).max(24),
+        emittedKgCo2ePerUnit: z.number().finite().nonnegative().max(999_999_999),
+        scope: z.string().trim().min(2).max(48),
+        geography: z.string().trim().min(2).max(160),
+        methodology: z.string().trim().min(3).max(240),
+        sourceName: z.string().trim().min(3).max(240),
+        sourceUrl: z.string().url().max(512).optional(),
+        factorVersion: z.string().trim().min(3).max(64),
+        validFrom: z.date(),
+        validTo: z.date().optional(),
+      }).refine((input) => !input.validTo || input.validTo.getTime() >= input.validFrom.getTime(), { message: "validTo must not be before validFrom.", path: ["validTo"] }))
+      .mutation(async ({ ctx, input }) => {
+        await requireOrganizationRole(ctx.user.id, input.organizationId, governanceRoles);
+        return db.createEmissionFactor({ ...input, userId: ctx.user.id });
+      }),
+    approve: protectedProcedure
+      .input(z.object({ organizationId: z.number().int().positive(), factorId: z.number().int().positive() }))
+      .mutation(async ({ ctx, input }) => {
+        await requireOrganizationRole(ctx.user.id, input.organizationId, governanceRoles);
+        const result = await db.approveEmissionFactor({ ...input, userId: ctx.user.id });
+        if (!result) throw new TRPCError({ code: "NOT_FOUND", message: "Emission factor not found in this organization." });
+        return result;
+      }),
+  }),
+
+  lineage: router({
+    importFile: protectedProcedure
+      .input(z.object({ organizationId: z.number().int().positive(), importFileId: z.number().int().positive() }))
+      .query(async ({ ctx, input }) => {
+        await requireOrganizationRole(ctx.user.id, input.organizationId);
+        const result = await db.getImportLineage(input.organizationId, input.importFileId);
+        if (!result) throw new TRPCError({ code: "NOT_FOUND", message: "Import file not found in this organization." });
+        return result;
+      }),
+    reading: protectedProcedure
+      .input(z.object({ organizationId: z.number().int().positive(), readingId: z.number().int().positive() }))
+      .query(async ({ ctx, input }) => {
+        await requireOrganizationRole(ctx.user.id, input.organizationId);
+        const result = await db.getReadingLineage(input.organizationId, input.readingId);
+        if (!result) throw new TRPCError({ code: "NOT_FOUND", message: "Reading not found in this organization." });
+        return result;
       }),
   }),
 
@@ -173,6 +305,82 @@ export const appRouter = router({
         await requireOrganizationRole(ctx.user.id, input.organizationId, mutableRoles);
         const runKey = input.runKey ?? `manual:${input.organizationId}:${ctx.user.id}:${Date.now()}`;
         return runMonitoringForOrganization({ organizationId: input.organizationId, runKey, trigger: "manual" });
+      }),
+    health: protectedProcedure
+      .input(z.object({ organizationId: z.number().int().positive() }))
+      .query(async ({ ctx, input }) => {
+        await requireOrganizationRole(ctx.user.id, input.organizationId);
+        return db.getMonitoringOperationalHealth(input.organizationId);
+      }),
+    configureTarget: protectedProcedure
+      .input(z.object({
+        organizationId: z.number().int().positive(),
+        expectedIntervalMinutes: z.number().int().min(5).max(24 * 60),
+        staleAfterMinutes: z.number().int().min(10).max(7 * 24 * 60),
+        isEnabled: z.boolean(),
+      }).refine((input) => input.staleAfterMinutes >= input.expectedIntervalMinutes, { path: ["staleAfterMinutes"], message: "Stale threshold must be at least the expected interval." }))
+      .mutation(async ({ ctx, input }) => {
+        await requireOrganizationRole(ctx.user.id, input.organizationId, governanceRoles);
+        return db.upsertMonitoringServiceTarget({ ...input, userId: ctx.user.id });
+      }),
+    retryRecovery: protectedProcedure
+      .input(z.object({ organizationId: z.number().int().positive(), recoveryEventId: z.number().int().positive() }))
+      .mutation(async ({ ctx, input }) => {
+        await requireOrganizationRole(ctx.user.id, input.organizationId, governanceRoles);
+        const runKey = `recovery:${input.organizationId}:${input.recoveryEventId}:${Date.now()}`;
+        const recovery = await db.markMonitoringRecoveryRetry({ organizationId: input.organizationId, recoveryEventId: input.recoveryEventId, retryRunKey: runKey });
+        if (!recovery) throw new TRPCError({ code: "NOT_FOUND", message: "Open recovery event not found in this organization." });
+        if (!recovery.started) return { recovery, run: null };
+        const run = await runMonitoringForOrganization({ organizationId: input.organizationId, runKey, trigger: "manual" });
+        return { recovery, run };
+      }),
+  }),
+
+  alertRouting: router({
+    get: protectedProcedure
+      .input(z.object({ organizationId: z.number().int().positive() }))
+      .query(async ({ ctx, input }) => {
+        await requireOrganizationRole(ctx.user.id, input.organizationId);
+        return db.getAlertRoutingPreference(input.organizationId);
+      }),
+    update: protectedProcedure
+      .input(z.object({ organizationId: z.number().int().positive(), minimumSeverity: z.enum(anomalySeverities), isEnabled: z.boolean() }))
+      .mutation(async ({ ctx, input }) => {
+        await requireOrganizationRole(ctx.user.id, input.organizationId, governanceRoles);
+        return db.upsertAlertRoutingPreference({ ...input, userId: ctx.user.id });
+      }),
+    deliveries: protectedProcedure
+      .input(z.object({ organizationId: z.number().int().positive() }))
+      .query(async ({ ctx, input }) => {
+        await requireOrganizationRole(ctx.user.id, input.organizationId);
+        return db.listAlertDeliveryAttempts(input.organizationId);
+    }),
+  }),
+
+  alertEscalation: router({
+    get: protectedProcedure
+      .input(z.object({ organizationId: z.number().int().positive() }))
+      .query(async ({ ctx, input }) => {
+        await requireOrganizationRole(ctx.user.id, input.organizationId);
+        return db.getAlertEscalationPolicy(input.organizationId);
+      }),
+    update: protectedProcedure
+      .input(z.object({ organizationId: z.number().int().positive(), minimumSeverity: z.enum(anomalySeverities), afterMinutes: z.number().int().min(5).max(7 * 24 * 60), isEnabled: z.boolean() }))
+      .mutation(async ({ ctx, input }) => {
+        await requireOrganizationRole(ctx.user.id, input.organizationId, governanceRoles);
+        return db.upsertAlertEscalationPolicy({ ...input, userId: ctx.user.id });
+      }),
+    list: protectedProcedure
+      .input(z.object({ organizationId: z.number().int().positive() }))
+      .query(async ({ ctx, input }) => {
+        await requireOrganizationRole(ctx.user.id, input.organizationId);
+        return db.listAlertEscalations(input.organizationId);
+      }),
+    evaluateNow: protectedProcedure
+      .input(z.object({ organizationId: z.number().int().positive() }))
+      .mutation(async ({ ctx, input }) => {
+        await requireOrganizationRole(ctx.user.id, input.organizationId, governanceRoles);
+        return db.evaluateAlertEscalations(input.organizationId);
       }),
   }),
 
