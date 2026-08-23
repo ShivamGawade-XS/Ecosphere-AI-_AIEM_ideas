@@ -1,7 +1,8 @@
 import "dotenv/config";
 import { createServer } from "http";
 import net from "net";
-import { serveStatic, setupVite } from "./vite";
+import { serveStatic } from "./static";
+import { setupVite } from "./vite";
 import { createApplication } from "./app";
 
 /**
