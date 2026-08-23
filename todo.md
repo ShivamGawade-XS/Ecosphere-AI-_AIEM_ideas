@@ -180,3 +180,9 @@
 - [ ] Publish the checkpoint and perform the authenticated scheduler trial against the deployed origin.
 - [ ] Configure a verified identity-provider invitation flow after selecting and connecting a delivery provider.
 - [ ] Complete remote CI execution, deployed restore rehearsal, and deployed accessibility/performance measurement.
+
+## GitHub Synchronization
+
+- [ ] Inspect the provided EcoSphere-specific GitHub repository and confirm its default branch and existing contents.
+- [ ] Push the current verified EcoSphere AI source and project configuration to the confirmed GitHub destination without modifying unrelated repositories.
+- [ ] Verify the remote commit, branch, and working-tree contents after push, then record the exact repository URL and commit.
