@@ -4,7 +4,7 @@
   "buildCommand": "pnpm build",
   "functions": {
     "api/index.mjs": {
-      "includeFiles": ["dist/index.js", "dist/public/**"],
+      "includeFiles": "dist/**",
       "maxDuration": 60
     }
   },
