@@ -29,11 +29,12 @@ describe("Vercel deployment contract", () => {
     expect(config.rewrites).toEqual([{ source: "/(.*)", destination: "/api" }]);
   });
 
-  it("exports the built application without starting a listener in Vercel", () => {
-    const bootstrapPath = path.resolve(import.meta.dirname, "index.ts");
+  it("exports a production application without development Vite imports", () => {
+    const bootstrapPath = path.resolve(import.meta.dirname, "serverApp.ts");
     const bootstrap = fs.readFileSync(bootstrapPath, "utf8");
 
     expect(bootstrap).toContain("export default app;");
-    expect(bootstrap).toContain("if (!process.env.VERCEL)");
+    expect(bootstrap).toContain("serveStatic(app);");
+    expect(bootstrap).not.toContain("./vite");
   });
 });
