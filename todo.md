@@ -204,3 +204,4 @@
 - [x] Create the user-authorized Git-linked Vercel project and deploy the verified GitHub main branch without enabling recurring Cron jobs.
 - [x] Record deployed URL, deployment evidence, and any environment-variable or external identity-provider gates discovered during verification.
 - [x] Fix and redeploy the Vercel serverless function after verifying the public health endpoint’s module-resolution failure.
+- [x] Align the Vercel deployment guide with the verified static output-directory configuration.
