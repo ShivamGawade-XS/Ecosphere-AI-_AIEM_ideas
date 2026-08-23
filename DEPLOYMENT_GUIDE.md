@@ -24,6 +24,10 @@ This guide describes how to release EcoSphere AI safely. It does **not** claim t
 
 Do not treat a development or preview URL as production-release evidence.
 
+## Vercel Publication
+
+For Vercel, import the merged GitHub `main` branch and follow [VERCEL_DEPLOYMENT.md](VERCEL_DEPLOYMENT.md). The repository includes `api/index.ts` and `vercel.json` so Vercel can run the Express application as a serverless function and serve the built client bundle. The Vercel Cron configuration is intentionally absent by default; it must be added only after the deployed health, OAuth, database, and tenant boundaries are accepted in a controlled trial.
+
 ## Secret Management
 
 Configure database, OAuth, session-signing, managed-service, and initial-owner values through the deployment platform’s secret-management interface. Never commit secret values. Verify that server credentials are absent from browser bundles, source control, browser output, report JSON, screenshots, and audit payloads.

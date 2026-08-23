@@ -194,3 +194,10 @@
 - [x] Create a deployment guide covering managed publication, migrations, secrets, health verification, scheduler activation, rollback, and claim-safe external prerequisites.
 - [x] Run dependency and source-level security audits and record actionable findings with verified remediation status.
 - [x] Merge the verified EcoSphere synchronization branch into the GitHub repository main branch through a conflict-resolved merge commit that preserves both histories, then verify the resulting remote commit.
+
+## Vercel Deployment Preparation
+
+- [x] Assess the Vercel runtime model against the current Express, OAuth, database, storage, and scheduler contracts.
+- [x] Add Vercel configuration and a Vercel-specific deployment section with required environment-variable names and safe operational limits.
+- [x] Validate a Vercel-compatible production build and document any platform constraints or required external services.
+- [ ] After user deployment, verify deployed health/readiness, OAuth, tenant protection, and one controlled scheduler trial before considering recurrence.
