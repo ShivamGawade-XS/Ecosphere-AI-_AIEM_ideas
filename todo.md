@@ -206,5 +206,5 @@
 - [x] Fix and redeploy the Vercel serverless function after verifying the public health endpoint’s module-resolution failure.
 - [x] Align the Vercel deployment guide with the verified static output-directory configuration.
 - [x] Create a step-by-step Vercel operator runbook covering environment configuration, OAuth callback registration, redeployment, health/readiness interpretation, verification, and the explicitly gated scheduler trial.
-- [ ] Verify the latest GitHub CI and Vercel deployment state after the documentation synchronization, then record any credential-independent findings.
+- [x] Verify the latest GitHub CI and Vercel deployment state after the documentation synchronization, then record any credential-independent findings.
 - [x] Pin the Vercel runtime to the locally and CI-validated Node.js 22 major release, then verify the deployment contract.
