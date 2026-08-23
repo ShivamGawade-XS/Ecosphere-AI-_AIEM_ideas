@@ -16,12 +16,14 @@ describe("Vercel deployment contract", () => {
     const config = JSON.parse(fs.readFileSync(configPath, "utf8")) as {
       buildCommand: string;
       installCommand: string;
+      outputDirectory: string;
       functions: Record<string, { includeFiles: string; maxDuration: number }>;
       rewrites: Array<{ source: string; destination: string }>;
     };
 
     expect(config.installCommand).toBe("pnpm install --frozen-lockfile");
     expect(config.buildCommand).toBe("pnpm build");
+    expect(config.outputDirectory).toBe("dist/public");
     expect(config.functions["api/index.mjs"]).toEqual({
       includeFiles: "dist/**",
       maxDuration: 60,
