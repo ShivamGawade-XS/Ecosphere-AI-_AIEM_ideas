@@ -201,3 +201,6 @@
 - [x] Add Vercel configuration and a Vercel-specific deployment section with required environment-variable names and safe operational limits.
 - [x] Validate a Vercel-compatible production build and document any platform constraints or required external services.
 - [ ] After user deployment, verify deployed health/readiness, OAuth, tenant protection, and one controlled scheduler trial before considering recurrence.
+- [ ] Create the user-authorized Git-linked Vercel project and deploy the verified GitHub main branch without enabling recurring Cron jobs.
+- [ ] Record deployed URL, deployment evidence, and any environment-variable or external identity-provider gates discovered during verification.
+- [ ] Fix and redeploy the Vercel serverless function after verifying the public health endpoint’s module-resolution failure.

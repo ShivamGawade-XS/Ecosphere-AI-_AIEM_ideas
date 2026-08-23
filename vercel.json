@@ -3,8 +3,8 @@
   "installCommand": "pnpm install --frozen-lockfile",
   "buildCommand": "pnpm build",
   "functions": {
-    "api/index.ts": {
-      "includeFiles": "dist/public/**",
+    "api/index.mjs": {
+      "includeFiles": ["dist/index.js", "dist/public/**"],
       "maxDuration": 60
     }
   },
