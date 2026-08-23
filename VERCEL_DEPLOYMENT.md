@@ -42,6 +42,7 @@ Configure secrets through **Vercel Project Settings → Environment Variables** 
 | `DATABASE_URL` | Database-backed product operations | Use a TLS-enabled, externally reachable MySQL/TiDB connection. |
 | `JWT_SECRET` | Session signing | Generate a high-entropy production secret. |
 | `VITE_APP_ID` | OAuth client identity | Public client identifier; must match the deployed callback settings. |
+| `VITE_OAUTH_PORTAL_URL` | Browser login redirect | Public OAuth-provider portal base URL used by the browser sign-in control. |
 | `OAUTH_SERVER_URL` | OAuth token/session flow | Must permit the Vercel production origin and callback URL. |
 | `OWNER_OPEN_ID` | Owner bootstrap and role governance | Set to the designated operator identity. |
 | `BUILT_IN_FORGE_API_URL` | Platform services | Required only when the chosen OAuth/storage/service adapter supports it outside Manus. |
