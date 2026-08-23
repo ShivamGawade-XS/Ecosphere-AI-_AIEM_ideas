@@ -179,7 +179,8 @@
 - [x] Add deterministic security-header middleware tests and include them in the full quality gate.
 - [ ] Publish the checkpoint and perform the authenticated scheduler trial against the deployed origin.
 - [ ] Configure a verified identity-provider invitation flow after selecting and connecting a delivery provider.
-- [ ] Complete remote CI execution, deployed restore rehearsal, and deployed accessibility/performance measurement.
+- [x] Complete a successful remote CI quality workflow run against the merged GitHub main branch.
+- [ ] Complete a deployed restore rehearsal and deployed accessibility/performance measurement after publication.
 
 ## GitHub Synchronization
 
