@@ -162,6 +162,7 @@ EcoSphere AI may be described as an **AI-powered, evidence-grounded sustainabili
 | Document | Purpose |
 |---|---|
 | [DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md) | Publication, migration, scheduler activation, rollback, and release evidence. |
+| [VERCEL_DEPLOYMENT.md](VERCEL_DEPLOYMENT.md) | Vercel serverless adapter, configuration, secret names, controlled Cron trial, and hosting constraints. |
 | [RELEASE_OPERATIONS_RUNBOOK.md](RELEASE_OPERATIONS_RUNBOOK.md) | Release, backup, recovery, and operational controls. |
 | [MONITORING_OPERATIONS_RUNBOOK.md](MONITORING_OPERATIONS_RUNBOOK.md) | Worker health, recovery, routing, and scheduler operations. |
 | [MONITORING_API_AND_WORKER_SPEC.md](MONITORING_API_AND_WORKER_SPEC.md) | Deterministic monitoring contract. |
