@@ -16,16 +16,24 @@ describe("Vercel deployment contract", () => {
     const config = JSON.parse(fs.readFileSync(configPath, "utf8")) as {
       buildCommand: string;
       installCommand: string;
-      functions: Record<string, { includeFiles: string; maxDuration: number }>;
+      functions: Record<string, { includeFiles: string[]; maxDuration: number }>;
       rewrites: Array<{ source: string; destination: string }>;
     };
 
     expect(config.installCommand).toBe("pnpm install --frozen-lockfile");
     expect(config.buildCommand).toBe("pnpm build");
-    expect(config.functions["api/index.ts"]).toEqual({
-      includeFiles: "dist/public/**",
+    expect(config.functions["api/index.mjs"]).toEqual({
+      includeFiles: ["dist/index.js", "dist/public/**"],
       maxDuration: 60,
     });
     expect(config.rewrites).toEqual([{ source: "/(.*)", destination: "/api" }]);
+  });
+
+  it("exports the built application without starting a listener in Vercel", () => {
+    const bootstrapPath = path.resolve(import.meta.dirname, "index.ts");
+    const bootstrap = fs.readFileSync(bootstrapPath, "utf8");
+
+    expect(bootstrap).toContain("export default app;");
+    expect(bootstrap).toContain("if (!process.env.VERCEL)");
   });
 });

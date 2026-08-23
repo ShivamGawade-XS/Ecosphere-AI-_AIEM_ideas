@@ -4,6 +4,14 @@ import net from "net";
 import { serveStatic, setupVite } from "./vite";
 import { createApplication } from "./app";
 
+/**
+ * The complete Express application is also exported for serverless adapters.
+ * A long-running listener is deliberately created only for the local/Node host.
+ */
+const app = createApplication();
+
+export default app;
+
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
     const server = net.createServer();
@@ -24,7 +32,6 @@ async function findAvailablePort(startPort: number = 3000): Promise<number> {
 }
 
 async function startServer() {
-  const app = createApplication();
   const server = createServer(app);
   // development mode uses Vite, production mode uses static files
   if (process.env.NODE_ENV === "development") {
@@ -45,4 +52,6 @@ async function startServer() {
   });
 }
 
-startServer().catch(console.error);
+if (!process.env.VERCEL) {
+  startServer().catch(console.error);
+}
