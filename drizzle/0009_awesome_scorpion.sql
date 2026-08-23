@@ -1,0 +1,1 @@
+ALTER TABLE `sustainability_recommendations` ADD CONSTRAINT `recommendations_anomaly_version_unique` UNIQUE(`anomalyId`,`recommendationVersion`);

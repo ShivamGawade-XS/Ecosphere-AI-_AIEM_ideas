@@ -1,0 +1,39 @@
+import React, { useState } from "react";
+import { Download, FileText, Loader2, ShieldCheck } from "lucide-react";
+import { trpc } from "@/lib/trpc";
+import { useActiveOrganization } from "@/hooks/useActiveOrganization";
+
+export default function ReportsWorkspace() {
+  const utils = trpc.useUtils();
+  const tenant = useActiveOrganization();
+  const organizationId = tenant.organizationId ?? 0;
+  const summary = trpc.reports.summary.useQuery({ organizationId }, { enabled: Boolean(organizationId) });
+  const snapshots = trpc.reports.snapshots.useQuery({ organizationId }, { enabled: Boolean(organizationId) });
+  const [snapshotTitle, setSnapshotTitle] = useState("AIEM Campus operational evidence snapshot");
+  const [notice, setNotice] = useState<string | null>(null);
+  const createSnapshot = trpc.reports.createSnapshot.useMutation({ onSuccess: async () => { await utils.reports.snapshots.invalidate({ organizationId }); setNotice("Evidence snapshot generated from the current tenant-scoped records."); }, onError: () => setNotice("Evidence snapshot was not generated. Retry the protected operation.") });
+
+  function exportSnapshot() {
+    if (!summary.data || !tenant.activeOrganization) return;
+    const rows = [["EcoSphere AI operational snapshot"], ["Organization", tenant.activeOrganization.organization.name], ["Registered sites", String(summary.data.overview.siteCount)], ["Registered meters", String(summary.data.overview.meterCount)], ["Persisted readings", String(summary.data.overview.readingCount)], ["Tracked actions", String(summary.data.overview.actionCount)], ["Active actions", String(summary.data.overview.activeActionCount)], ["Generated at", new Date().toISOString()]];
+    const csv = rows.map((row) => row.map((value) => `"${value.replaceAll("\"", "\"\"")}"`).join(",")).join("\n");
+    const link = document.createElement("a"); link.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" })); link.download = "ecosphere-operational-snapshot.csv"; link.click(); URL.revokeObjectURL(link.href);
+  }
+
+  function downloadEvidence(snapshot: { id: number; title: string; criteria: unknown; evidence: unknown; factorDisclosure: string; createdAt: Date }) {
+    const content = JSON.stringify({ title: snapshot.title, criteria: snapshot.criteria, evidence: snapshot.evidence, factorDisclosure: snapshot.factorDisclosure, createdAt: snapshot.createdAt }, null, 2);
+    const link = document.createElement("a"); link.href = URL.createObjectURL(new Blob([content], { type: "application/json" })); link.download = `ecosphere-evidence-snapshot-${snapshot.id}.json`; link.click(); URL.revokeObjectURL(link.href);
+  }
+
+  if (tenant.isLoading || summary.isLoading || snapshots.isLoading) return <div className="app-loading-state"><Loader2 className="animate-spin"/> Loading report boundary…</div>;
+  if (tenant.error || summary.error || snapshots.error) return <section className="workspace-error"><span className="ops-eyebrow"><span /> REPORT UNAVAILABLE</span><h1>Operational records could not be summarized.</h1><p>No export is offered until the protected report query succeeds.</p><button onClick={() => { void summary.refetch(); void snapshots.refetch(); }}>Retry report query</button></section>;
+  if (!tenant.activeOrganization) return <section className="empty-workspace"><span className="ops-eyebrow"><span /> REPORTING NEEDS EVIDENCE</span><h1>Nothing is reportable yet.</h1><p>Create an organization and establish a source registry before producing a scoped operational snapshot.</p></section>;
+  const overview = summary.data?.overview;
+  return <div className="ecosystem-page">
+    <header className="workspace-header"><div><span className="ops-eyebrow"><span /> REPORTS</span><h1>Export only what the records support.</h1><p>Evidence snapshots preserve their criteria, persisted results, comparison evidence, and factor disclosure. They are not certified sustainability disclosures or regulatory filings.</p></div><button className="export-button" onClick={exportSnapshot} disabled={!summary.data}><Download size={16}/> Export CSV overview</button></header>
+    {notice && <div className="workbench-notice" role="status">{notice}</div>}
+    <section className="report-sheet"><div className="report-sheet__stamp"><FileText size={27}/><span>OPERATIONAL SNAPSHOT</span><b>Tenant scoped</b></div><div className="report-stats"><div><span>SITES</span><b>{overview?.siteCount ?? 0}</b></div><div><span>METERS</span><b>{overview?.meterCount ?? 0}</b></div><div><span>READINGS</span><b>{overview?.readingCount ?? 0}</b></div><div><span>ACTIONS</span><b>{overview?.actionCount ?? 0}</b></div></div><div className="report-disclaimer"><ShieldCheck size={20}/><p>Scope: tenant registry, persisted readings, ingestion history, tracked actions, saved forecasts, recommendations, and comparisons only when they exist in the database. Carbon calculations retain their factor disclosures and pilot limitations.</p></div></section>
+    <section className="workspace-panel"><header><div><span className="ops-eyebrow">EVIDENCE-GRADE SNAPSHOT</span><h2>Freeze the records behind a report</h2></div><FileText size={22}/></header><p>Generation stores the report criteria and evidence payload server-side. The downloadable JSON is an export of that stored snapshot, not a recalculated client claim.</p><div className="workspace-actions"><input aria-label="Evidence snapshot title" value={snapshotTitle} onChange={(event) => setSnapshotTitle(event.target.value)} minLength={3}/><button disabled={createSnapshot.isPending || snapshotTitle.trim().length < 3} onClick={() => createSnapshot.mutate({ organizationId, title: snapshotTitle.trim() })}>{createSnapshot.isPending ? "Generating snapshot…" : "Generate evidence snapshot"}</button></div>{createSnapshot.error ? <p role="alert" className="form-error">{createSnapshot.error.message}</p> : null}{snapshots.data?.length ? <div className="compact-list">{snapshots.data.map((snapshot) => <div key={snapshot.id}><span>#{snapshot.id} · {new Date(snapshot.createdAt).toLocaleString()}</span><b>{snapshot.title}</b><small>{snapshot.factorDisclosure}</small><button onClick={() => downloadEvidence(snapshot)}>Download stored JSON</button></div>)}</div> : <p>No evidence snapshot exists for this tenant yet.</p>}</section>
+    <section className="workspace-panel"><span className="ops-eyebrow">INGESTION HISTORY</span><h2>Recent source submissions</h2>{summary.data?.recentBatches.length ? <div className="compact-list">{summary.data.recentBatches.map((batch) => <div key={batch.id}><span>#{batch.id} · {batch.source}</span><b>{batch.acceptedRows}/{batch.totalRows} accepted</b><small>{batch.status}</small></div>)}</div> : <p>No ingestion batch has been recorded for this tenant.</p>}</section>
+  </div>;
+}

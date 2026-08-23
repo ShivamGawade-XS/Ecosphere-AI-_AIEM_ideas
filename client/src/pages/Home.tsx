@@ -1,111 +1,429 @@
-import { AIChatBox, type Message } from "@/components/AIChatBox";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Progress } from "@/components/ui/progress";
-import { Slider } from "@/components/ui/slider";
-import { Switch } from "@/components/ui/switch";
-import { cn } from "@/lib/utils";
-import { trpc } from "@/lib/trpc";
-import { downloadSustainabilityReport } from "@/lib/sustainabilityReport";
-import { ArrowDownRight, ArrowUpRight, BellRing, Bot, BrainCircuit, Building2, CheckCircle2, ChevronRight, CircleAlert, CloudUpload, Droplets, FileDown, Gauge, Leaf, Loader2, Menu, MoreHorizontal, Play, RefreshCw, Sparkles, Target, Trash2, TrendingUp, X } from "lucide-react";
+/**
+ * Field Operations Ledger style: editorial sustainability mission control.
+ * Uses field-paper surfaces, moss ink, provenance labels, and chartreuse only
+ * as an operational signal. Numerical outputs are explicit modeled estimates.
+ */
 import { useMemo, useRef, useState } from "react";
-import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { toast } from "sonner";
+import {
+  Activity,
+  ArrowDownRight,
+  ArrowUpRight,
+  Calculator,
+  Check,
+  ChevronRight,
+  CircleGauge,
+  CloudSun,
+  Database,
+  Droplets,
+  Leaf,
+  MoveRight,
+  Radar,
+  Recycle,
+  ShieldCheck,
+  TriangleAlert,
+  Zap,
+} from "lucide-react";
+import EcoSphereMark from "@/components/EcoSphereMark";
 
-const navItems = [
-  { id: "overview", label: "Command center", icon: Gauge },
-  { id: "analytics", label: "Analytics", icon: TrendingUp },
-  { id: "simulator", label: "What-if studio", icon: BrainCircuit },
-  { id: "alerts", label: "Alert center", icon: BellRing },
-  { id: "advisor", label: "AI advisor", icon: Bot },
+const stages = [
+  { id: "monitor", label: "Monitor", title: "Start with a trusted reading.", copy: "The implemented platform foundation persists authenticated meter readings with source, unit, and provenance evidence.", icon: Activity, proof: "Registry + ingestion" },
+  { id: "detect", label: "Detect", title: "Make unusual movement visible.", copy: "The next monitoring service will turn validated baseline deviation into an operational event and alert.", icon: Radar, proof: "Planned: anomaly → alert" },
+  { id: "predict", label: "Predict", title: "Read the short-term direction.", copy: "The planned analytics service will provide a bounded forecast with visible assumptions and factor versions.", icon: CircleGauge, proof: "Planned: bounded forecast" },
+  { id: "simulate", label: "Simulate", title: "Test the intervention before the budget.", copy: "The public prototype shows transparent modeled inputs; a server-authoritative scenario service is tracked in the readiness workspace.", icon: Calculator, proof: "Prototype scenario" },
+  { id: "recommend", label: "Recommend", title: "Give the team a practical next move.", copy: "The planned recommendation service will cite recorded evidence. AI explanations must never create environmental numbers.", icon: ShieldCheck, proof: "Planned: evidence-linked action" },
+  { id: "act", label: "Act", title: "Close the gap in the real campus.", copy: "The pilot focuses attention on a small set of high-value resource streams and interventions.", icon: Zap, proof: "Pilot-ready scope" },
+  { id: "measure", label: "Measure", title: "Return to the same baseline.", copy: "The operational loop is designed to compare modeled action with later measured evidence once a monitoring worker is deployed.", icon: Activity, proof: "Measurement-after-action" },
 ];
 
-const formatter = new Intl.NumberFormat("en-IN", { maximumFractionDigits: 0 });
-const number = (value: number) => formatter.format(Math.round(value));
+const evidence = [
+  { label: "DATA LINEAGE", value: "SIMULATED", note: "AIEM Campus fixture. The new data foundation records source, unit, and provenance for live inputs.", icon: Database },
+  { label: "NUMERICAL AUTHORITY", value: "ENGINE", note: "The prototype calculations are deterministic; authoritative server calculations remain tracked work.", icon: Calculator },
+  { label: "AI BOUNDARY", value: "CONSTRAINED", note: "Planned AI explanations will frame recorded evidence and will not invent environmental numbers.", icon: ShieldCheck },
+];
+
+const interventions = [
+  { id: "hvac", title: "Smart HVAC controls", detail: "Prioritize the biggest energy signal first.", score: "1", icon: Zap, tone: "moss", energy: 18, renewable: 0, water: 0, waste: 0, recycling: 0, investment: 400000 },
+  { id: "led", title: "LED upgrade", detail: "Reduce controllable lighting load.", score: "2", icon: CloudSun, tone: "paper", energy: 12, renewable: 0, water: 0, waste: 0, recycling: 0, investment: 300000 },
+  { id: "solar", title: "Rooftop solar", detail: "Add renewable contribution in stages.", score: "3", icon: Leaf, tone: "charcoal", energy: 3, renewable: 35, water: 0, waste: 0, recycling: 0, investment: 800000 },
+  { id: "water", title: "Water-saving systems", detail: "Tighten consumption at the meter.", score: "4", icon: Droplets, tone: "sand", energy: 0, renewable: 0, water: 25, waste: 10, recycling: 10, investment: 250000 },
+];
+
+function formatINR(value: number) {
+  return new Intl.NumberFormat("en-IN", {
+    style: "currency",
+    currency: "INR",
+    maximumFractionDigits: 0,
+  }).format(value);
+}
 
 function scrollToSection(id: string) {
   document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
-function SeverityBadge({ severity }: { severity: string }) {
-  const styles: Record<string, string> = {
-    critical: "border-rose-400/40 bg-rose-400/10 text-rose-200",
-    high: "border-orange-300/40 bg-orange-300/10 text-orange-200",
-    medium: "border-amber-300/40 bg-amber-300/10 text-amber-100",
-    low: "border-sky-300/40 bg-sky-300/10 text-sky-100",
-  };
-  return <Badge className={cn("border px-2.5 py-1 text-[10px] font-bold tracking-[0.14em] uppercase", styles[severity] ?? styles.low)}>{severity}</Badge>;
-}
-
-function SectionTitle({ eyebrow, title, description, action }: { eyebrow: string; title: string; description?: string; action?: React.ReactNode }) {
-  return <div className="mb-5 flex flex-wrap items-end justify-between gap-4"><div><p className="quiet-label text-[10px] text-emerald-300/75">{eyebrow}</p><h2 className="mt-1 text-xl font-bold tracking-tight text-white sm:text-2xl">{title}</h2>{description ? <p className="mt-1 max-w-2xl text-sm text-emerald-50/52">{description}</p> : null}</div>{action}</div>;
-}
-
-function MetricCard({ icon: Icon, label, value, unit, trend, accent }: { icon: typeof Gauge; label: string; value: number; unit: string; trend: number; accent: string }) {
-  const improving = trend < 0;
-  return <article className="mission-surface metric-glow glass-line rise-in rounded-2xl p-4 sm:p-5"><div className="flex items-start justify-between"><div className={cn("flex h-10 w-10 items-center justify-center rounded-xl", accent)}><Icon className="h-5 w-5" /></div><div className={cn("flex items-center gap-1 text-xs font-semibold", improving ? "text-emerald-300" : "text-amber-200")}>{improving ? <ArrowDownRight className="h-3.5 w-3.5" /> : <ArrowUpRight className="h-3.5 w-3.5" />}{Math.abs(trend)}%</div></div><p className="mt-5 text-2xl font-extrabold tracking-tight text-white sm:text-3xl">{number(value)}</p><p className="mt-0.5 text-xs font-medium text-emerald-50/55">{unit}</p><p className="mt-3 text-sm font-semibold text-emerald-50/82">{label}</p></article>;
-}
-
-function TrendChart({ data }: { data: Array<{ timestamp: number; value: number; unit: string }> }) {
-  const chartData = useMemo(() => data.map((point, index) => ({ ...point, label: index % 2 === 0 ? new Date(point.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "" })), [data]);
-  return <ResponsiveContainer width="100%" height={270}><AreaChart data={chartData} margin={{ top: 12, right: 6, left: -18, bottom: 0 }}><defs><linearGradient id="energyGradient" x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stopColor="#70e2b8" stopOpacity={0.45} /><stop offset="100%" stopColor="#70e2b8" stopOpacity={0} /></linearGradient></defs><CartesianGrid stroke="rgba(146, 206, 178, 0.1)" vertical={false} /><XAxis dataKey="label" tick={{ fill: "rgba(219, 255, 234, 0.45)", fontSize: 10 }} axisLine={false} tickLine={false} minTickGap={18} /><YAxis tick={{ fill: "rgba(219, 255, 234, 0.45)", fontSize: 10 }} axisLine={false} tickLine={false} /><Tooltip contentStyle={{ background: "#102b22", border: "1px solid rgba(155, 222, 188, 0.25)", borderRadius: "12px", color: "#ecfff4", fontSize: "12px" }} labelStyle={{ color: "#abdbc0" }} formatter={(value: number) => [`${value} kWh`, "Observed"]} /><Area type="monotone" dataKey="value" stroke="#70e2b8" strokeWidth={2.5} fill="url(#energyGradient)" /></AreaChart></ResponsiveContainer>;
-}
-
 export default function Home() {
-  const [mobileOpen, setMobileOpen] = useState(false);
+  const [activeStage, setActiveStage] = useState("detect");
   const [energyReduction, setEnergyReduction] = useState(15);
-  const [waterReduction, setWaterReduction] = useState(8);
-  const [wasteDiversion, setWasteDiversion] = useState(12);
-  const [messages, setMessages] = useState<Message[]>([]);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const utils = trpc.useUtils();
-  const dashboard = trpc.sustainability.dashboard.useQuery(undefined, { refetchInterval: 20_000 });
-  const data = dashboard.data;
-  const injectSpike = trpc.sustainability.injectEnergySpike.useMutation({ onSuccess: result => { utils.sustainability.dashboard.invalidate(); toast.success(result.created ? "Simulated HVAC spike detected and escalated." : "The simulated HVAC incident is already active."); }, onError: error => toast.error(error.message) });
-  const updateAlert = trpc.sustainability.updateAlertStatus.useMutation({ onSuccess: () => { utils.sustainability.dashboard.invalidate(); toast.success("Alert status updated."); }, onError: error => toast.error(error.message) });
-  const simulation = trpc.sustainability.simulate.useMutation({ onError: error => toast.error(error.message) });
-  const updateMonitoring = trpc.sustainability.updateMonitoring.useMutation({ onSuccess: () => { utils.sustainability.dashboard.invalidate(); toast.success("Notification preference updated."); }, onError: error => toast.error(error.message) });
-  const updateRecommendation = trpc.sustainability.updateRecommendationStatus.useMutation({ onSuccess: () => { utils.sustainability.dashboard.invalidate(); toast.success("Recommendation lifecycle updated."); }, onError: error => toast.error(error.message) });
-  const activateSchedule = trpc.sustainability.activateScheduledMonitoring.useMutation({ onSuccess: () => { utils.sustainability.dashboard.invalidate(); toast.success("Scheduled monitoring is active."); }, onError: error => toast.error(error.message) });
-  const scheduledCheck = trpc.sustainability.runScheduledCheckForDemo.useMutation({ onSuccess: result => toast.success(`Scheduled check complete: ${result.unresolved ?? 0} unresolved incidents.`), onError: error => toast.error(error.message) });
-  const importCsv = trpc.sustainability.importCsv.useMutation({ onSuccess: result => { utils.sustainability.dashboard.invalidate(); toast.success(`${result.imported} rows imported from ${result.source}.`); }, onError: error => toast.error(error.message) });
-  const advisor = trpc.sustainability.advisor.useMutation({ onSuccess: result => setMessages(current => [...current, { role: "assistant", content: result.content }]), onError: error => { toast.error(error.message); setMessages(current => [...current, { role: "assistant", content: "I could not reach the advisor. Use the dashboard's simulated alert and recommendation panels for the next action." }]); } });
+  const [renewableShare, setRenewableShare] = useState(20);
+  const [waterReduction, setWaterReduction] = useState(10);
+  const [wasteReduction, setWasteReduction] = useState(10);
+  const [recyclingRate, setRecyclingRate] = useState(25);
+  const [investment, setInvestment] = useState(500000);
+  const [selectedIntervention, setSelectedIntervention] = useState("custom");
+  const [processingPreset, setProcessingPreset] = useState<string | null>(null);
+  const [processingStatus, setProcessingStatus] = useState("Ready to model an intervention.");
+  const stageRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const processingTimer = useRef<number | null>(null);
 
-  const runSimulation = () => simulation.mutate({ energyReductionPct: energyReduction, waterReductionPct: waterReduction, wasteDiversionPct: wasteDiversion });
-  const currentSimulation = simulation.data ?? data?.defaultSimulation;
-  const exportPdfReport = () => {
-    if (!data) return;
-    try {
-      downloadSustainabilityReport({ campus: data.campus, generatedAt: data.generatedAt, isSimulated: data.isSimulated, ecoScore: data.ecoScore, metrics: data.metrics, forecast: data.forecast, alerts: data.alerts });
-      toast.success("Sustainability PDF report downloaded.");
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Unable to create the PDF report.");
+  const active = stages.find((stage) => stage.id === activeStage) ?? stages[1];
+  const ActiveIcon = active.icon;
+
+  const model = useMemo(() => {
+    const baseline = { energy: 9780, water: 1270, waste: 985, carbon: 6420 };
+    const annualEnergySaved = baseline.energy * (energyReduction / 100);
+    const electricityCarbon = baseline.carbon * 0.72;
+    const waterCarbon = baseline.carbon * 0.12;
+    const wasteCarbon = baseline.carbon * 0.16;
+    const directReduction = electricityCarbon * (energyReduction / 100);
+    const renewableReduction = electricityCarbon * (1 - energyReduction / 100) * (renewableShare / 100);
+    const waterCarbonReduction = waterCarbon * (waterReduction / 100);
+    const wasteCarbonReduction = wasteCarbon * (wasteReduction / 100);
+    const recyclingCarbonReduction = wasteCarbon * (1 - wasteReduction / 100) * (recyclingRate / 100);
+    const carbonReduction = directReduction + renewableReduction + waterCarbonReduction + wasteCarbonReduction + recyclingCarbonReduction;
+    const projectedCarbon = Math.max(0, baseline.carbon - carbonReduction);
+    const annualWaterSaved = baseline.water * (waterReduction / 100);
+    const divertedWaste = baseline.waste * (1 - wasteReduction / 100) * (recyclingRate / 100);
+    const avoidedWaste = baseline.waste * (wasteReduction / 100) + divertedWaste;
+    const annualSavings = annualEnergySaved * 9.2 + annualWaterSaved * 56 + avoidedWaste * 4.2 + renewableShare * 1450;
+    const payback = annualSavings > 0 ? investment / annualSavings : 0;
+    const roi = investment > 0 ? ((annualSavings * 3 - investment) / investment) * 100 : 0;
+
+    return {
+      ...baseline,
+      annualEnergySaved,
+      annualWaterSaved,
+      avoidedWaste,
+      projectedCarbon,
+      carbonReduction,
+      annualSavings,
+      payback,
+      roi,
+    };
+  }, [energyReduction, renewableShare, waterReduction, wasteReduction, recyclingRate, investment]);
+
+  function activateStage(index: number) {
+    setActiveStage(stages[index].id);
+    stageRefs.current[index]?.focus();
+  }
+
+  function handleStageKeyDown(event: React.KeyboardEvent<HTMLButtonElement>, index: number) {
+    let nextIndex: number | null = null;
+    if (event.key === "ArrowRight" || event.key === "ArrowDown") nextIndex = (index + 1) % stages.length;
+    if (event.key === "ArrowLeft" || event.key === "ArrowUp") nextIndex = (index - 1 + stages.length) % stages.length;
+    if (event.key === "Home") nextIndex = 0;
+    if (event.key === "End") nextIndex = stages.length - 1;
+    if (event.key === "Enter" || event.key === " ") nextIndex = index;
+    if (nextIndex !== null) {
+      event.preventDefault();
+      activateStage(nextIndex);
     }
-  };
-  const onSendAdvisorMessage = (question: string) => { const nextMessages = [...messages, { role: "user" as const, content: question }]; setMessages(nextMessages); advisor.mutate({ question, conversation: messages.filter(message => message.role !== "system").map(message => ({ role: message.role as "user" | "assistant", content: message.content })) }); };
-  const uploadCsv = async (file?: File) => { if (!file || !data) return; const source = data.dataSources.find(item => item.sourceType === "csv" && item.approved); if (!source) return toast.error("No approved CSV source is available."); importCsv.mutate({ sourceId: source.id, csvData: await file.text() }); };
+  }
 
-  if (dashboard.isLoading || !data) return <div className="grid min-h-screen place-items-center bg-[#061511]"><div className="flex flex-col items-center gap-4 text-emerald-100"><Leaf className="h-10 w-10 animate-pulse text-emerald-300" /><p className="quiet-label text-xs">Loading mission control</p></div></div>;
+  function applyIntervention(intervention: (typeof interventions)[number]) {
+    if (processingPreset) return;
+    if (processingTimer.current) window.clearTimeout(processingTimer.current);
+    setProcessingPreset(intervention.id);
+    setProcessingStatus(`Processing ${intervention.title} against the AIEM Campus baseline…`);
+    processingTimer.current = window.setTimeout(() => {
+      setEnergyReduction(intervention.energy);
+      setRenewableShare(intervention.renewable);
+      setWaterReduction(intervention.water);
+      setWasteReduction(intervention.waste);
+      setRecyclingRate(intervention.recycling);
+      setInvestment(intervention.investment);
+      setSelectedIntervention(intervention.id);
+      setProcessingPreset(null);
+      setProcessingStatus(`${intervention.title} preset applied. Modeled outputs updated.`);
+      processingTimer.current = null;
+    }, 720);
+    requestAnimationFrame(() => document.getElementById("simulator")?.scrollIntoView({ behavior: "smooth", block: "start" }));
+  }
 
-  const openAlerts = data.alerts.filter(alert => alert.status !== "resolved");
-  return <div className="min-h-screen bg-[#061511] text-emerald-50"><div className="pointer-events-none fixed inset-0 overflow-hidden"><div className="absolute -left-32 -top-44 h-[35rem] w-[35rem] rounded-full bg-emerald-400/10 blur-3xl" /><div className="absolute right-0 top-1/3 h-96 w-96 rounded-full bg-cyan-400/5 blur-3xl" /></div><div className="relative flex min-h-screen">
-    <aside className={cn("fixed inset-y-0 left-0 z-50 flex w-[272px] flex-col border-r border-emerald-200/10 bg-[#071a14]/95 px-4 py-5 backdrop-blur-xl transition-transform lg:sticky lg:translate-x-0", mobileOpen ? "translate-x-0" : "-translate-x-full")}>
-      <div className="flex items-center gap-3 px-2"><div className="grid h-10 w-10 place-items-center rounded-xl bg-gradient-to-br from-emerald-300 to-teal-500 text-[#082018] shadow-lg shadow-emerald-950/40"><Leaf className="h-5 w-5 fill-current" /></div><div><p className="text-base font-extrabold tracking-tight text-white">EcoSphere <span className="text-emerald-300">AI</span></p><p className="quiet-label mt-0.5 text-[8px] text-emerald-100/45">Mission control</p></div><Button variant="ghost" size="icon" className="ml-auto text-emerald-100/60 lg:hidden" onClick={() => setMobileOpen(false)}><X className="h-5 w-5" /></Button></div>
-      <div className="mt-10"><p className="quiet-label px-2 text-[9px] text-emerald-100/35">Navigate</p><nav className="mt-3 space-y-1">{navItems.map(item => <button key={item.id} onClick={() => { scrollToSection(item.id); setMobileOpen(false); }} className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold text-emerald-50/62 transition hover:bg-emerald-300/10 hover:text-emerald-50"><item.icon className="h-4 w-4 text-emerald-300/70" />{item.label}</button>)}</nav></div>
-      <div className="mt-auto rounded-2xl border border-emerald-300/15 bg-emerald-300/[0.06] p-4"><div className="flex items-center gap-2"><span className="relative flex h-2.5 w-2.5"><span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-300 opacity-60" /><span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-300" /></span><p className="text-xs font-bold text-emerald-100">Demo mode active</p></div><p className="mt-2 text-xs leading-relaxed text-emerald-50/45">Seeded telemetry is clearly marked and all results are reproducible.</p></div>
-    </aside>
-    {mobileOpen ? <button aria-label="Close menu" onClick={() => setMobileOpen(false)} className="fixed inset-0 z-40 bg-black/55 lg:hidden" /> : null}
-    <main className="grid-canvas min-w-0 flex-1 overflow-hidden"><header className="sticky top-0 z-30 flex h-[76px] items-center justify-between border-b border-emerald-200/10 bg-[#071a14]/75 px-4 backdrop-blur-xl sm:px-6 lg:px-9"><div className="flex items-center gap-3"><Button variant="ghost" size="icon" className="text-emerald-100 lg:hidden" onClick={() => setMobileOpen(true)}><Menu className="h-5 w-5" /></Button><div><p className="quiet-label text-[9px] text-emerald-100/40">Campus pilot</p><div className="mt-1 flex items-center gap-2"><h1 className="text-sm font-bold text-white sm:text-base">{data.campus.name}</h1><span className="h-1 w-1 rounded-full bg-emerald-100/30" /><span className="text-xs text-emerald-100/52">{data.campus.location}</span></div></div></div><div className="flex items-center gap-2 sm:gap-3"><Badge className="hidden border border-emerald-300/25 bg-emerald-300/10 px-2.5 py-1 text-[10px] font-bold tracking-wider text-emerald-200 sm:flex">SIMULATED DATA</Badge><Button onClick={() => injectSpike.mutate()} disabled={injectSpike.isPending} className="h-10 rounded-xl bg-emerald-300 px-3 text-xs font-extrabold text-[#092219] hover:bg-emerald-200 sm:px-4"><Play className="mr-1.5 h-3.5 w-3.5 fill-current" />{injectSpike.isPending ? "Injecting" : "Run live demo"}</Button></div></header>
-      <div className="mx-auto max-w-[1600px] p-4 sm:p-6 lg:p-9">
-        <section id="overview" className="scroll-mt-24"><div className="mission-surface glass-line overflow-hidden rounded-3xl p-5 sm:p-7"><div className="flex flex-col justify-between gap-8 xl:flex-row xl:items-end"><div className="max-w-3xl"><div className="mb-4 flex items-center gap-2"><span className="h-2 w-2 rounded-full bg-emerald-300" /><p className="quiet-label text-[10px] text-emerald-200/65">Sustainability intelligence</p></div><h2 className="text-3xl font-extrabold tracking-[-0.045em] text-white sm:text-4xl">See the signal.<br /><span className="text-emerald-300">Change the system.</span></h2><p className="mt-4 max-w-xl text-sm leading-relaxed text-emerald-50/58">A judge-ready decision layer for monitoring campus resources, finding operational exceptions, and testing measurable climate action before deployment.</p></div><div className="flex flex-wrap gap-2"><Button variant="outline" onClick={exportPdfReport} className="border-emerald-200/20 bg-emerald-100/5 text-emerald-50 hover:bg-emerald-100/10"><FileDown className="mr-2 h-4 w-4 text-emerald-300" />Export report</Button><Button variant="outline" onClick={() => scrollToSection("simulator")} className="border-emerald-200/20 bg-emerald-100/5 text-emerald-50 hover:bg-emerald-100/10"><BrainCircuit className="mr-2 h-4 w-4 text-emerald-300" />Test intervention</Button><Button variant="ghost" onClick={() => scrollToSection("alerts")} className="text-emerald-100/75 hover:bg-emerald-100/10 hover:text-white"><BellRing className="mr-2 h-4 w-4" />{openAlerts.length} active alerts</Button></div></div><div className="mt-7 flex flex-wrap items-center gap-x-6 gap-y-2 border-t border-emerald-200/10 pt-4 text-xs text-emerald-50/48"><span className="flex items-center gap-2"><CheckCircle2 className="h-3.5 w-3.5 text-emerald-300" />Monitor</span><ChevronRight className="hidden h-3 w-3 text-emerald-100/25 sm:block" /><span className="flex items-center gap-2"><Sparkles className="h-3.5 w-3.5 text-emerald-300" />Detect &amp; predict</span><ChevronRight className="hidden h-3 w-3 text-emerald-100/25 sm:block" /><span className="flex items-center gap-2"><Target className="h-3.5 w-3.5 text-emerald-300" />Simulate &amp; act</span><ChevronRight className="hidden h-3 w-3 text-emerald-100/25 sm:block" /><span className="flex items-center gap-2"><RefreshCw className="h-3.5 w-3.5 text-emerald-300" />Measure &amp; repeat</span></div></div>
-          <div className="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-4"><MetricCard icon={Gauge} label="Energy intensity" value={data.metrics.energy.value} unit={data.metrics.energy.unit} trend={data.metrics.energy.trend} accent="bg-amber-300/15 text-amber-200" /><MetricCard icon={Droplets} label="Water demand" value={data.metrics.water.value} unit={data.metrics.water.unit} trend={data.metrics.water.trend} accent="bg-sky-300/15 text-sky-200" /><MetricCard icon={Trash2} label="Material output" value={data.metrics.waste.value} unit={data.metrics.waste.unit} trend={data.metrics.waste.trend} accent="bg-violet-300/15 text-violet-200" /><MetricCard icon={CloudUpload} label="Carbon footprint" value={data.metrics.carbon.value} unit={data.metrics.carbon.unit} trend={data.metrics.carbon.trend} accent="bg-emerald-300/15 text-emerald-200" /></div>
-        </section>
-        <section id="analytics" className="scroll-mt-24 mt-10"><SectionTitle eyebrow="Operational telemetry" title="The campus pulse" description="Hourly seeded demonstration readings. Trend and forecast calculations are deterministic and traceable." action={<Badge className="border border-emerald-300/20 bg-emerald-300/10 px-3 py-1.5 text-xs text-emerald-100">Forecast confidence {data.forecast.confidence}%</Badge>} /><div className="grid gap-5 xl:grid-cols-[1.7fr_0.9fr]"><article className="mission-surface glass-line rounded-2xl p-4 sm:p-6"><div className="mb-2 flex items-start justify-between"><div><p className="text-sm font-bold text-white">Energy flow</p><p className="mt-1 text-xs text-emerald-100/45">kWh per observed hour · simulated</p></div><MoreHorizontal className="h-5 w-5 text-emerald-100/40" /></div><TrendChart data={data.series.energy} /></article><article className="mission-surface glass-line rounded-2xl p-5 sm:p-6"><p className="quiet-label text-[10px] text-emerald-200/55">EcoScore</p><div className="mt-4 flex items-end gap-3"><p className="text-6xl font-extrabold tracking-[-0.06em] text-white">{data.ecoScore.total}</p><p className="mb-2 text-sm font-semibold text-emerald-100/48">/ 100</p></div><p className="mt-3 text-sm leading-relaxed text-emerald-50/56">Composite view of current demo energy, water, waste, and calculated carbon performance.</p><div className="mt-6 space-y-4">{Object.entries(data.ecoScore).filter(([key]) => key !== "total").map(([key, value]) => <div key={key}><div className="mb-1.5 flex justify-between text-xs"><span className="capitalize text-emerald-50/65">{key}</span><span className="font-bold text-emerald-100">{value}</span></div><Progress value={value} className="h-1.5 bg-emerald-100/10 [&>div]:bg-emerald-300" /></div>)}</div><div className="mt-6 rounded-xl bg-emerald-300/[0.07] p-3"><p className="text-xs font-semibold text-emerald-100">Forecast snapshot</p><p className="mt-1 text-xs leading-relaxed text-emerald-50/52">Projected next hour: <span className="font-bold text-emerald-200">{data.forecast.nextValue} {data.forecast.unit}</span> ({data.forecast.changePct > 0 ? "+" : ""}{data.forecast.changePct}% trend).</p></div></article></div></section>
-        <section id="simulator" className="scroll-mt-24 mt-10"><SectionTitle eyebrow="Decision laboratory" title="What-if sustainability studio" description="Model conservation measures before committing operational resources. Outcomes use disclosed prototype demo factors." /><div className="grid gap-5 xl:grid-cols-[1.1fr_0.9fr]"><article className="mission-surface glass-line rounded-2xl p-5 sm:p-6"><div className="space-y-6">{[{ label: "Reduce energy demand", value: energyReduction, set: setEnergyReduction, color: "bg-amber-300" }, { label: "Reduce water demand", value: waterReduction, set: setWaterReduction, color: "bg-sky-300" }, { label: "Improve waste diversion", value: wasteDiversion, set: setWasteDiversion, color: "bg-violet-300" }].map(item => <div key={item.label}><div className="mb-3 flex items-center justify-between"><span className="text-sm font-semibold text-emerald-50/80">{item.label}</span><span className="rounded-lg bg-emerald-100/8 px-2 py-1 font-mono text-xs font-bold text-emerald-100">{item.value}%</span></div><Slider value={[item.value]} min={0} max={item.label.includes("waste") ? 60 : 40} step={1} onValueChange={values => item.set(values[0] ?? 0)} className="[&_[role=slider]]:border-emerald-100 [&_[role=slider]]:bg-emerald-300 [&_[data-slot=slider-range]]:bg-emerald-300" /></div>)}</div><Button onClick={runSimulation} disabled={simulation.isPending} className="mt-8 w-full rounded-xl bg-emerald-300 font-extrabold text-[#092219] hover:bg-emerald-200">{simulation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}Run simulation</Button></article><article className="relative overflow-hidden rounded-2xl border border-emerald-300/20 bg-gradient-to-br from-emerald-300/15 via-[#123b2e] to-[#0a241b] p-5 sm:p-6"><div className="absolute right-0 top-0 h-40 w-40 rounded-full bg-emerald-200/10 blur-3xl" /><p className="quiet-label text-[10px] text-emerald-100/55">Projected monthly impact</p><p className="mt-3 text-xl font-extrabold text-white">{currentSimulation?.summary}</p><div className="mt-7 grid grid-cols-2 gap-4"><div><p className="text-2xl font-extrabold text-emerald-200">{number(currentSimulation?.co2AvoidedKg ?? 0)}</p><p className="mt-1 text-xs text-emerald-50/55">kgCO₂e avoided</p></div><div><p className="text-2xl font-extrabold text-emerald-200">₹{number(currentSimulation?.monthlySavingsInr ?? 0)}</p><p className="mt-1 text-xs text-emerald-50/55">monthly savings</p></div><div><p className="text-2xl font-extrabold text-emerald-200">+{currentSimulation?.ecoScoreLift ?? 0}</p><p className="mt-1 text-xs text-emerald-50/55">EcoScore points</p></div><div><p className="text-2xl font-extrabold text-emerald-200">#{currentSimulation?.interventionRank ?? 0}</p><p className="mt-1 text-xs text-emerald-50/55">intervention rank</p></div></div><div className="mt-6 border-t border-emerald-100/15 pt-4 text-xs leading-relaxed text-emerald-50/54">Calculation: avoided energy × 0.71 kgCO₂e/kWh; avoided energy × ₹9.80/kWh. <span className="font-semibold text-emerald-100">Prototype factors shown for demo transparency.</span></div></article></div><div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">{data.sdgImpact.map(item => <article key={item.id} className="mission-surface glass-line rounded-xl p-4"><div className="flex justify-between"><span className="font-mono text-xs font-bold" style={{ color: item.colour }}>{item.id}</span><span className="text-xs font-bold text-white">{item.value}%</span></div><p className="mt-2 text-sm font-semibold text-emerald-50/78">{item.title}</p><Progress value={item.value} className="mt-3 h-1.5 bg-emerald-100/10" style={{ "--progress-color": item.colour } as React.CSSProperties} /></article>)}</div></section>
-        <section id="alerts" className="scroll-mt-24 mt-10"><SectionTitle eyebrow="Incident response" title="Alert center" description="Anomalies are assessed server-side. High-severity simulated alerts can notify the project owner and receive scheduled follow-ups after deployment." action={<div className="flex items-center gap-2"><Switch checked={data.monitoring.notificationsEnabled} onCheckedChange={enabled => updateMonitoring.mutate({ enabled, scheduleMinutes: data.monitoring.scheduleMinutes })} disabled={updateMonitoring.isPending} /><span className="text-xs text-emerald-50/55">Owner alerts</span></div>} /><div className="grid gap-5 xl:grid-cols-[1.4fr_0.6fr]"><div className="space-y-3">{data.alerts.length === 0 ? <article className="mission-surface glass-line rounded-2xl p-6 text-center"><CheckCircle2 className="mx-auto h-7 w-7 text-emerald-300" /><p className="mt-3 text-sm font-bold text-white">No active incidents</p><p className="mt-1 text-xs text-emerald-50/48">Run the live demo to inject a controlled HVAC energy spike.</p></article> : data.alerts.map(alert => <article key={alert.id} className={cn("glass-line rounded-2xl border p-4 sm:p-5", alert.status === "resolved" ? "bg-emerald-300/[0.04] opacity-70" : "mission-surface")}><div className="flex flex-wrap items-start justify-between gap-3"><div className="flex gap-3"><div className={cn("mt-0.5 grid h-10 w-10 place-items-center rounded-xl", alert.severity === "high" ? "bg-orange-300/15 text-orange-200" : "bg-sky-300/15 text-sky-200")}><CircleAlert className="h-5 w-5" /></div><div><div className="flex flex-wrap items-center gap-2"><p className="text-sm font-bold text-white">{alert.title}</p><SeverityBadge severity={alert.severity} /></div><p className="mt-1 text-xs leading-relaxed text-emerald-50/52">{alert.description}</p></div></div><Badge variant="outline" className="border-emerald-100/15 text-[10px] uppercase tracking-wider text-emerald-100/55">{alert.status}</Badge></div><div className="mt-4 grid gap-3 border-t border-emerald-100/10 pt-3 sm:grid-cols-[1fr_auto]"><p className="text-xs leading-relaxed text-emerald-50/60"><span className="font-bold text-emerald-100">Next:</span> {alert.recommendedAction}</p>{alert.status !== "resolved" ? <div className="flex gap-2"><Button size="sm" variant="outline" className="border-emerald-100/15 bg-emerald-100/5 text-xs text-emerald-50 hover:bg-emerald-100/10" onClick={() => updateAlert.mutate({ alertId: alert.id, status: "acknowledged" })}>Acknowledge</Button><Button size="sm" className="bg-emerald-300 text-xs font-bold text-[#092219] hover:bg-emerald-200" onClick={() => updateAlert.mutate({ alertId: alert.id, status: "resolved" })}>Resolve</Button></div> : null}</div></article>)}</div><aside className="mission-surface glass-line rounded-2xl p-5"><p className="text-sm font-bold text-white">Monitoring cadence</p><p className="mt-2 text-xs leading-relaxed text-emerald-50/52">Configured for {data.monitoring.scheduleMinutes}-minute checks. {data.monitoring.active ? "Scheduled monitoring is active." : "Publish first, then activate the owner schedule."}</p>{!data.monitoring.active ? <Button onClick={() => activateSchedule.mutate({ scheduleMinutes: 15 })} disabled={activateSchedule.isPending} variant="outline" className="mt-3 w-full border-emerald-100/15 bg-transparent text-xs text-emerald-100 hover:bg-emerald-100/10">{activateSchedule.isPending ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <BellRing className="mr-2 h-3.5 w-3.5" />}Activate after publish</Button> : null}<div className="mt-5 rounded-xl bg-emerald-300/[0.07] p-3"><p className="text-xs font-semibold text-emerald-100">Demo control</p><p className="mt-1 text-xs text-emerald-50/52">Run the same unresolved-alert logic on demand.</p><Button onClick={() => scheduledCheck.mutate()} disabled={scheduledCheck.isPending} variant="outline" className="mt-3 w-full border-emerald-100/15 bg-transparent text-xs text-emerald-100 hover:bg-emerald-100/10">{scheduledCheck.isPending ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-2 h-3.5 w-3.5" />}Run scheduled check</Button></div></aside></div></section>
-        <section id="advisor" className="scroll-mt-24 mt-10 pb-10"><SectionTitle eyebrow="Guided action" title="EcoSphere AI advisor" description="The advisor explains the provided telemetry and deterministic findings. It never fabricates numerical indicators." /><div className="grid gap-5 xl:grid-cols-[0.8fr_1.2fr]"><article className="mission-surface glass-line rounded-2xl p-5"><div className="flex h-full flex-col"><div className="flex items-center gap-3"><div className="grid h-10 w-10 place-items-center rounded-xl bg-violet-300/15 text-violet-200"><Sparkles className="h-5 w-5" /></div><div><p className="text-sm font-bold text-white">Recommendation queue</p><p className="text-xs text-emerald-50/48">Persisted from live demo state</p></div></div><div className="mt-5 space-y-3">{data.recommendations.map((item, index) => <div key={item.title} className="rounded-xl border border-emerald-100/10 bg-emerald-100/[0.035] p-3"><div className="flex items-center justify-between gap-3"><p className="text-xs font-bold text-emerald-50/85">{index + 1}. {item.title}</p><div className="flex gap-1"><Badge className="border-0 bg-emerald-300/10 text-[10px] text-emerald-200">{item.impact}</Badge><Badge variant="outline" className="border-emerald-100/15 text-[10px] text-emerald-100/60">{"status" in item ? item.status : "active"}</Badge></div></div><p className="mt-1.5 text-xs leading-relaxed text-emerald-50/48">{item.detail}</p><div className="mt-2 flex flex-wrap items-center gap-3"><button onClick={() => onSendAdvisorMessage(`How should we execute the ${item.title.toLowerCase()} recommendation?`)} className="text-xs font-bold text-emerald-300 hover:text-emerald-200">Ask advisor <ChevronRight className="inline h-3 w-3" /></button>{"id" in item && ("status" in item ? item.status : "active") === "active" ? <button onClick={() => updateRecommendation.mutate({ recommendationId: item.id, status: "implemented" })} disabled={updateRecommendation.isPending} className="text-xs font-bold text-emerald-100/65 hover:text-emerald-200">Mark implemented</button> : null}</div></div>)}</div></div></article><AIChatBox messages={messages} onSendMessage={onSendAdvisorMessage} isLoading={advisor.isPending} height="480px" placeholder="Ask about a signal, alert, or intervention…" emptyStateMessage="Ask for a concise recommendation grounded in the simulated campus data." suggestedPrompts={["What needs attention first?", "Explain the energy forecast.", "How should we respond to an HVAC spike?", "Which intervention has the strongest impact?"]} className="border-emerald-100/15 bg-[#0c251c] shadow-xl shadow-black/10" /></div></section>
-        <section className="mb-8 rounded-2xl border border-dashed border-emerald-100/15 bg-emerald-100/[0.025] p-5"><div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center"><div className="flex gap-3"><Building2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-300" /><div><p className="text-sm font-bold text-white">Future data ingestion is prepared</p><p className="mt-1 max-w-2xl text-xs leading-relaxed text-emerald-50/50">Approved CSV sources can be imported today; sensor and API connections remain paused until an owner approves their field mapping and credentials.</p><div className="mt-2 flex flex-wrap gap-2">{data.dataSources.map(source => <Badge key={source.id} variant="outline" className="border-emerald-100/12 text-[10px] text-emerald-100/55">{source.name} · {source.status}{source.approved ? " · approved" : ""}</Badge>)}</div></div></div><div><input ref={fileInputRef} type="file" accept=".csv,text/csv" className="hidden" onChange={event => uploadCsv(event.target.files?.[0])} /><Button variant="outline" onClick={() => fileInputRef.current?.click()} disabled={importCsv.isPending} className="border-emerald-200/20 bg-emerald-100/5 text-emerald-50 hover:bg-emerald-100/10">{importCsv.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CloudUpload className="mr-2 h-4 w-4 text-emerald-300" />}Import approved CSV</Button></div></div></section>
-      </div>
+  function setScenarioValue(setter: (value: number) => void, value: number) {
+    setter(value);
+    setSelectedIntervention("custom");
+  }
+
+  return (
+    <main className="site-shell">
+      <header className="site-header">
+        <a href="/narrative" className="brand-link" aria-label="EcoSphere AI public narrative">
+          <EcoSphereMark />
+        </a>
+        <nav className="top-nav" aria-label="Primary navigation">
+          <a href="#loop">The loop</a>
+          <a href="#simulator">Scenario engine</a>
+          <a href="#pilot">Pilot scope</a>
+        </nav>
+        <a className="header-cta" href="/">
+          Open workspace <ArrowDownRight size={16} />
+        </a>
+      </header>
+
+      <section id="top" className="hero-section">
+        <div className="hero-rail" aria-hidden="true">
+          <span>AIEM CAMPUS · 2026</span>
+          <i />
+          <span>FIELD REPORT 01</span>
+        </div>
+        <div className="hero-copy">
+          <div className="eyebrow"><span className="signal-dot" /> AI-POWERED SUSTAINABILITY MISSION CONTROL</div>
+          <h1>Make the next climate action <em>easier to see.</em></h1>
+          <p className="hero-lede">
+            EcoSphere AI turns campus resource signals into a traceable operations loop—from measurement and anomaly detection to a modeled intervention and its next practical action.
+          </p>
+          <div className="hero-actions">
+            <a className="button button--ink" href="/">
+              Open mission control <MoveRight size={18} />
+            </a>
+            <button className="text-button" onClick={() => scrollToSection("loop")}>
+              Explore the pilot narrative <ChevronRight size={17} />
+            </button>
+          </div>
+          <div className="hero-footnote">
+            <span>SIMULATED AIEM FIXTURE</span>
+            <span>DETERMINISTIC NUMERICAL ENGINE</span>
+          </div>
+        </div>
+
+        <div className="hero-dossier">
+          <img
+            src="/manus-storage/ecosphere-hero-mission-control_79db0674.jpg"
+            alt="Art-directed mission-control visual of a campus sustainability model"
+            className="hero-art"
+          />
+          <div className="hero-art-overlay" />
+          <div className="dossier-topline"><span>LIVE DEMO VIEW</span><span className="dossier-pill">SIMULATED</span></div>
+          <div className="dossier-focus">
+            <div className="alert-seal"><TriangleAlert size={20} /></div>
+            <div>
+              <span className="micro-label">DETECTED SIGNAL</span>
+              <strong>HVAC load moved outside its baseline band.</strong>
+            </div>
+          </div>
+          <div className="dossier-grid">
+            <div><span>RESOURCE</span><b>ENERGY</b></div>
+            <div><span>ENGINE</span><b>TRACEABLE</b></div>
+            <div><span>NEXT STEP</span><b>REVIEW HVAC</b></div>
+          </div>
+          <div className="dossier-ticker"><span className="ticker-pulse" /> TARGET: WORKER INDEPENDENT FROM BROWSER</div>
+        </div>
+      </section>
+
+      <section className="evidence-strip" aria-label="Product truth boundary">
+        <div className="evidence-strip__intro">
+          <span className="eyebrow">WHY IT IS TRUSTWORTHY</span>
+          <p>Numbers are calculated. Language is constrained.</p>
+        </div>
+        {evidence.map((item) => {
+          const Icon = item.icon;
+          return (
+            <article className="evidence-card" key={item.label}>
+              <Icon size={19} strokeWidth={1.7} />
+              <span>{item.label}</span>
+              <strong>{item.value}</strong>
+              <p>{item.note}</p>
+            </article>
+          );
+        })}
+      </section>
+
+      <section id="loop" className="loop-section">
+        <div className="section-heading">
+          <div>
+            <span className="eyebrow">THE CLOSED LOOP</span>
+            <h2>One signal. A more useful decision.</h2>
+          </div>
+          <p>EcoSphere treats sustainability management as an observable operating loop, not a static reporting exercise. The readiness workspace marks each production capability honestly.</p>
+        </div>
+
+        <div className="process-tape" role="tablist" aria-label="EcoSphere sustainability loop">
+          {stages.map((stage, index) => {
+            const Icon = stage.icon;
+            const selected = stage.id === activeStage;
+            return (
+              <button
+                key={stage.id}
+                className={`process-stop ${selected ? "process-stop--active" : ""}`}
+                ref={(node) => { stageRefs.current[index] = node; }}
+                onClick={() => setActiveStage(stage.id)}
+                onKeyDown={(event) => handleStageKeyDown(event, index)}
+                role="tab"
+                aria-selected={selected}
+                aria-controls="stage-detail"
+                tabIndex={selected ? 0 : -1}
+              >
+                <span className="process-index">0{index + 1}</span>
+                <Icon size={18} strokeWidth={1.7} />
+                <span>{stage.label}</span>
+              </button>
+            );
+          })}
+        </div>
+
+        <div id="stage-detail" className="stage-detail" role="tabpanel">
+          <div className="stage-visual"><ActiveIcon size={35} strokeWidth={1.45} /><span>{active.proof}</span></div>
+          <div>
+            <span className="micro-label">ACTIVE STEP · {active.label.toUpperCase()}</span>
+            <h3>{active.title}</h3>
+          </div>
+          <p>{active.copy}</p>
+          <button className="round-action" onClick={() => scrollToSection("simulator")} aria-label="Open the scenario engine"><ArrowDownRight size={22} /></button>
+        </div>
+      </section>
+
+      <section className="signal-section">
+        <div className="signal-photo-wrap">
+          <img src="/manus-storage/ecosphere-campus-signal_5a5a962b.jpg" alt="Campus landscape with sustainability infrastructure" />
+          <div className="photo-stamp">SOURCE PATH / AIEM CAMPUS PILOT</div>
+        </div>
+        <div className="signal-copy">
+          <span className="eyebrow">NOT ANOTHER REPORTING LAYER</span>
+          <h2>From a meter event to an accountable next move.</h2>
+          <p>The pilot begins with four high-value streams: HVAC electricity, lighting and plug load, main water, and mixed waste. The scope is intentionally small enough to validate—and specific enough to act on.</p>
+          <div className="mini-route">
+            <div><Zap size={18}/><span>HVAC<br/><b>electricity</b></span></div>
+            <div><CloudSun size={18}/><span>Lighting<br/><b>load</b></span></div>
+            <div><Droplets size={18}/><span>Main<br/><b>water</b></span></div>
+            <div><Recycle size={18}/><span>Mixed<br/><b>waste</b></span></div>
+          </div>
+          <div className="signal-quote"><span>“</span><p>The product does not hide its assumptions. It makes the route from signal to action inspectable.</p></div>
+        </div>
+      </section>
+
+      <section id="simulator" className="simulator-section">
+        <div className="simulator-heading">
+          <div>
+            <span className="eyebrow eyebrow--light">THE SCENARIO ENGINE</span>
+            <h2>Test an action before you fund it.</h2>
+          </div>
+          <p>Adjust the transparent assumptions. The output below is a browser-side representation of the pilot’s deterministic scenario logic, not a guarantee of realized impact.</p>
+        </div>
+        <div className="simulator-grid">
+          <aside className="control-panel">
+            <div className="panel-label"><span>SCENARIO / A</span><span>MODELED</span></div>
+            <label className="slider-row">
+              <span><b>Energy reduction</b><output>{energyReduction}%</output></span>
+              <input type="range" min="0" max="35" value={energyReduction} onChange={(event) => setScenarioValue(setEnergyReduction, Number(event.target.value))} />
+              <small>Demand-side action against energy baseline</small>
+            </label>
+            <label className="slider-row">
+              <span><b>Renewable contribution</b><output>{renewableShare}%</output></span>
+              <input type="range" min="0" max="50" value={renewableShare} onChange={(event) => setScenarioValue(setRenewableShare, Number(event.target.value))} />
+              <small>Modeled share of remaining electricity emissions</small>
+            </label>
+            <label className="slider-row">
+              <span><b>Water reduction</b><output>{waterReduction}%</output></span>
+              <input type="range" min="0" max="40" value={waterReduction} onChange={(event) => setScenarioValue(setWaterReduction, Number(event.target.value))} />
+              <small>Demand-side action against main-water baseline</small>
+            </label>
+            <label className="slider-row">
+              <span><b>Waste reduction</b><output>{wasteReduction}%</output></span>
+              <input type="range" min="0" max="40" value={wasteReduction} onChange={(event) => setScenarioValue(setWasteReduction, Number(event.target.value))} />
+              <small>Modeled source reduction before disposal</small>
+            </label>
+            <label className="slider-row">
+              <span><b>Recycling contribution</b><output>{recyclingRate}%</output></span>
+              <input type="range" min="0" max="60" value={recyclingRate} onChange={(event) => setScenarioValue(setRecyclingRate, Number(event.target.value))} />
+              <small>Modeled share of remaining waste diverted from disposal</small>
+            </label>
+            <label className="slider-row">
+              <span><b>Investment</b><output>{formatINR(investment)}</output></span>
+              <input type="range" min="100000" max="1500000" step="50000" value={investment} onChange={(event) => setScenarioValue(setInvestment, Number(event.target.value))} />
+              <small>Transparent scenario input, not a procurement quote</small>
+            </label>
+            <div className="control-note"><ShieldCheck size={16} /> Numerical source: <b>scenario calculation engine</b></div>
+          </aside>
+
+          <div className="scenario-output">
+            <div className="output-topline"><span>BEFORE → AFTER</span><span className="simulated-tag">SIMULATED RESULT</span></div>
+            <div className={`scenario-live-status ${processingPreset ? "scenario-live-status--processing" : ""}`} role="status" aria-live="polite" aria-atomic="true">
+              <span>{processingPreset ? <><i className="processing-spinner" aria-hidden="true" /> PROCESSING PRESET</> : selectedIntervention === "custom" ? "CUSTOM SCENARIO" : `PRESET / ${interventions.find((item) => item.id === selectedIntervention)?.title.toUpperCase()}`}</span>
+              <b>{processingPreset ? processingStatus : `${Math.round(model.carbonReduction).toLocaleString()} kgCO₂e modeled reduction`}</b>
+            </div>
+            <div className="carbon-bar-wrap">
+              <div className="carbon-values"><span>{model.carbon.toLocaleString()} kgCO₂e</span><ArrowDownRight size={18}/><strong>{Math.round(model.projectedCarbon).toLocaleString()} kgCO₂e</strong></div>
+              <div className="carbon-bar"><span style={{ width: `${Math.min(100, (model.projectedCarbon / model.carbon) * 100)}%` }} /></div>
+              <p><b>{Math.round(model.carbonReduction).toLocaleString()} kgCO₂e</b> modeled reduction from the selected inputs.</p>
+            </div>
+            <div className="output-stat-grid">
+              <div><span>ENERGY AVOIDED</span><strong>{Math.round(model.annualEnergySaved).toLocaleString()} <small>kWh/yr</small></strong></div>
+              <div><span>WATER AVOIDED</span><strong>{Math.round(model.annualWaterSaved).toLocaleString()} <small>m³/yr</small></strong></div>
+              <div><span>WASTE AVOIDED</span><strong>{Math.round(model.avoidedWaste).toLocaleString()} <small>kg/yr</small></strong></div>
+              <div><span>ANNUAL SAVINGS</span><strong>{formatINR(model.annualSavings)}</strong></div>
+              <div><span>PAYBACK</span><strong>{model.payback > 0 ? `${model.payback.toFixed(1)} yrs` : "—"}</strong></div>
+              <div><span>3-YEAR ROI</span><strong>{Math.round(model.roi)}<small>%</small></strong></div>
+            </div>
+            <div className="sdg-line"><span>PRIMARY OUTCOME</span><b>SDG 13 · Climate Action</b><i /> <span>SUPPORTING</span><b>7 · 9 · 11 · 12</b></div>
+          </div>
+        </div>
+      </section>
+
+      <section className="interventions-section">
+        <div className="interventions-copy">
+          <span className="eyebrow">INTERVENTION QUEUE</span>
+          <h2>Compare the action, not the slogans.</h2>
+          <p>For the AIEM pilot, intervention cards are ranked as a decision-support view. The current browser model is illustrative; production actions require server-authoritative calculations and recorded evidence.</p>
+          <img src="/manus-storage/ecosphere-scenario-table_022e21f9.jpg" alt="Field-journal workspace for an intervention scenario review" />
+        </div>
+        <div className="intervention-list">
+          {interventions.map((item) => {
+            const Icon = item.icon;
+            return (
+              <button
+                type="button"
+                className={`intervention-card intervention-card--${item.tone} ${selectedIntervention === item.id ? "intervention-card--selected" : ""}`}
+                key={item.title}
+                onClick={() => applyIntervention(item)}
+                disabled={Boolean(processingPreset)}
+                aria-pressed={selectedIntervention === item.id}
+                aria-busy={processingPreset === item.id}
+                aria-label={`Apply ${item.title} scenario preset`}
+              >
+                <div className="rank">0{item.score}</div>
+                <Icon size={23} strokeWidth={1.7} />
+                <div><h3>{item.title}</h3><p>{item.detail}</p></div>
+                <ArrowUpRight size={20} />
+              </button>
+            );
+          })}
+        </div>
+      </section>
+
+      <section id="pilot" className="pilot-section">
+        <div className="pilot-rail"><span>TRUST THE BOUNDARY</span><i /><span>THEN BUILD THE PILOT</span></div>
+        <div className="pilot-layout">
+          <div>
+            <span className="eyebrow">AIEM CAMPUS PILOT</span>
+            <h2>A credible prototype knows where its evidence ends.</h2>
+          </div>
+          <div className="pilot-notes">
+            <p><Check size={17}/> Today’s public demo uses deterministic simulated readings and a transparent browser-side calculation model.</p>
+            <p><Check size={17}/> The protected platform foundation now adds identity, tenant registry, audit events, and validated meter-reading ingestion.</p>
+            <p><Check size={17}/> It is not yet presented as a certified reporting system, live Odoo integration, monitored production tenant system, or guarantee of savings.</p>
+            <p><Check size={17}/> The next campus phase adds verified meters, factors, durable analytics workers, alerts, and measurement-after-action.</p>
+          </div>
+        </div>
+        <div className="closing-statement">
+          <EcoSphereMark inverse compact />
+          <p>“EcoSphere AI now secures the path to persisted resource data; its next services detect change, run server-side scenarios, and explain the next action—without asking a language model to invent environmental numbers.”</p>
+        </div>
+      </section>
+
+      <footer className="site-footer">
+        <EcoSphereMark />
+        <p>AIEM IDEAS 2026 · SUSTAINABILITY OPERATIONS PILOT</p>
+        <a href="#top">Back to top <ArrowUpRight size={15}/></a>
+      </footer>
     </main>
-  </div></div>;
+  );
 }

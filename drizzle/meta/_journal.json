@@ -5,22 +5,92 @@
     {
       "idx": 0,
       "version": "5",
-      "when": 1787387306922,
-      "tag": "0000_overconfident_kronos",
+      "when": 1787370354089,
+      "tag": "0000_married_forgotten_one",
       "breakpoints": true
     },
     {
       "idx": 1,
       "version": "5",
-      "when": 1787387802619,
-      "tag": "0001_parched_young_avengers",
+      "when": 1787370422216,
+      "tag": "0001_ambitious_warpath",
       "breakpoints": true
     },
     {
       "idx": 2,
       "version": "5",
-      "when": 1787388843425,
-      "tag": "0002_careless_rockslide",
+      "when": 1787373941131,
+      "tag": "0002_robust_blizzard",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "5",
+      "when": 1787374333199,
+      "tag": "0003_sparkling_skreet",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "5",
+      "when": 1787378327686,
+      "tag": "0004_nosy_ronan",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "5",
+      "when": 1787380484824,
+      "tag": "0005_sharp_zemo",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "5",
+      "when": 1787381696729,
+      "tag": "0006_sour_prism",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "5",
+      "when": 1787382230535,
+      "tag": "0007_quiet_terror",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "5",
+      "when": 1787383212170,
+      "tag": "0008_normal_onslaught",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "5",
+      "when": 1787383388540,
+      "tag": "0009_awesome_scorpion",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "5",
+      "when": 1787384248865,
+      "tag": "0010_slim_photon",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "5",
+      "when": 1787385982815,
+      "tag": "0011_fat_lady_vermin",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "5",
+      "when": 1787389557791,
+      "tag": "0012_thankful_gertrude_yorkes",
       "breakpoints": true
     }
   ]

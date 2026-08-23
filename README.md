@@ -1,70 +1,174 @@
 # EcoSphere AI — AI-Powered Sustainability Mission Control
 
-EcoSphere AI is a full-stack sustainability intelligence prototype created for **AIEM IDEAS 2026** at Agnel Institute of Engineering and Management, Goa. It turns campus telemetry into a clear operational loop: **monitor → detect → predict → simulate → recommend → act → measure → repeat**.
+EcoSphere AI is a **tenant-scoped sustainability-operations platform** built for the AIEM IDEAS 2026 demonstration. It implements an operational loop of **Monitor → Detect → Predict → Simulate → Recommend → Act → Measure → Repeat**.
 
-The project is intentionally designed for a dependable live demonstration. Its AIEM Campus Pilot runs without paid external data services, identifies all seeded information as **simulated**, and keeps numerical findings deterministic and traceable.
+The application is designed to make sustainability decisions inspectable. Deterministic services calculate data quality, carbon, anomaly, EcoScore, forecasts, intervention comparisons, and action evidence. AI-generated language is restricted to explanations and recommendations; it must not manufacture measurements, forecasts, factors, or savings.
 
-## What the prototype demonstrates
+## Implemented Product Scope
 
-| Capability | Demonstration behavior |
-| --- | --- |
-| Executive dashboard | Energy, water, waste, calculated carbon, EcoScore, and a compact sustainability trend view. |
-| Anomaly response | A controlled HVAC energy spike produces a server-side high-severity alert with a next action. |
-| Forecasting | A transparent short-horizon forecast based on the latest energy telemetry trend. |
-| What-if simulator | Adjustable conservation measures calculate projected carbon avoidance, monthly savings, EcoScore lift, and intervention rank. |
-| AI advisor | Short follow-up guidance grounded in the supplied telemetry context; it does not invent metrics. |
-| SDG impact | Measurable prototype indicators for SDGs 7, 11, 12, and 13. |
-| Data ingestion readiness | Approved CSV import today, with sensor and API source records ready for controlled future activation. |
-| Monitoring architecture | Scheduled unresolved-alert checks and owner notifications are prepared for activation after publication. |
+| Area | Implemented capability | Important boundary |
+|---|---|---|
+| Tenant workspace | OAuth-protected organizations, sites, meters, role boundaries, and tenant-scoped audit evidence. | Members must already exist through the configured identity provider; this repository does not deliver invitation emails. |
+| Trusted data | CSV preview, validation, quarantine, idempotent import commit, correction lineage, and governed factor records. | All pilot and simulated sources remain labelled. The fallback factor is not certified reporting. |
+| Monitoring | Browser-independent, idempotent worker path for quality analysis, carbon, anomalies, EcoScore, forecasts, and recommendations. | A recurring scheduler is deliberately inactive until deployment and controlled-trial evidence exist. |
+| Decision support | Server-authoritative scenarios, intervention comparisons, evidence-linked recommendations, actions, collaboration, attachments, and report snapshots. | Modelled savings and forecasts are not guarantees or realized performance claims. |
+| Administration | Owner-safe role controls, audit evidence, liveness/readiness visibility, and an owner-gated scheduler-trial planner. | Planning a trial does not imply a schedule is active. |
+| Operations | Health/readiness endpoints, correlation-safe request telemetry, recovery states, quality workflow, runbooks, and security headers. | External telemetry, notifications, backups, remote CI proof, and restore-drill evidence remain operator responsibilities. |
 
-## Quick start
+## Product Journeys
 
-Install dependencies and start the local development server.
+1. Sign in with the configured OAuth provider and open **Operations Overview**.
+2. Register a site and meter in **Registry**, then ingest labelled readings in **Live Data** or **Data Quality**.
+3. Review deterministic quality findings, carbon calculations, EcoScore, trends, anomalies, and alerts in **Intelligence**.
+4. Model an intervention in **Scenarios**, persist a comparison, and create an accountable action.
+5. Add evidence before completing actions; review evidence snapshots and factor disclosures in **Reports**.
+6. Review role controls, health/readiness state, audit evidence, and safe scheduler-trial steps in **Administration**.
+
+## Architecture
+
+```text
+React 19 + TypeScript + Vite
+        │
+        ├── Wouter routes / React Query / tRPC client
+        │
+Express 4 + tRPC 11 + OAuth
+        │
+        ├── tenant and role authorization
+        ├── deterministic sustainability services
+        ├── storage-backed action evidence
+        └── public health/readiness endpoints
+        │
+Drizzle ORM + managed MySQL/TiDB
+        │
+        ├── organizations, sites, meters, readings
+        ├── import, factor, and correction lineage
+        ├── quality, anomaly, carbon, score, forecast records
+        ├── recommendations, actions, comparisons, reports
+        └── monitoring runs, recovery, routing, scheduler evidence
+        │
+Browser-independent monitoring worker
+        │
+        └── one-shot CLI or authenticated cron callback
+```
+
+The worker contains no browser-owned loop, `setInterval`, `node-cron`, or uncontrolled LLM loop. Scheduled requests use idempotent run keys, and `/api/scheduled/monitoring` accepts only platform-authenticated cron requests.
+
+## Technology Stack
+
+| Layer | Technology |
+|---|---|
+| Front end | React 19, TypeScript, Vite, Tailwind CSS 4, Wouter, Radix UI, React Query |
+| Server/API | Express 4, tRPC 11, SuperJSON, Zod |
+| Data | Drizzle ORM with MySQL/TiDB |
+| Identity | OAuth integration with owner/manager/operator authorization |
+| Storage | Managed object storage references for action attachments; file bytes are not stored in database columns |
+| Tests | Vitest and Testing Library |
+| CI | GitHub Actions quality workflow at `.github/workflows/quality.yml` |
+
+## Repository Layout
+
+```text
+client/                 React application, pages, UI components, tests
+server/                 tRPC contracts, persistence, worker, server core
+drizzle/                Schema and reviewed SQL migrations
+shared/                 Shared types and constants
+.github/workflows/      CI quality workflow
+DEPLOYMENT_GUIDE.md     Deployment, migration, scheduler, and rollback procedure
+RELEASE_OPERATIONS_RUNBOOK.md
+MONITORING_OPERATIONS_RUNBOOK.md
+```
+
+## Local Development
+
+Use Node.js 22 or later and the pinned pnpm version declared in `package.json`. Authenticated database workflows need a compatible MySQL/TiDB database and OAuth settings managed outside version control.
 
 ```bash
-pnpm install
+corepack enable
+pnpm install --frozen-lockfile
 pnpm dev
 ```
 
-Run the quality checks before proposing changes.
+The server selects an available port beginning at `3000`. Opening the front end does **not** start continuous monitoring.
+
+| Command | Purpose |
+|---|---|
+| `pnpm dev` | Start the Express/Vite development server. |
+| `pnpm check` | Run TypeScript validation. |
+| `pnpm test` | Run the Vitest suite. |
+| `pnpm build` | Build browser assets and server output. |
+| `pnpm start` | Run the built production server. |
+| `pnpm quality` | Run type-check, tests, build, and whitespace validation. |
+| `pnpm monitor:once` | Run one deterministic, browser-independent monitoring cycle. |
+| `pnpm drizzle-kit generate` | Generate SQL after a reviewed schema change. |
+
+Do not use `pnpm db:push` to replay historical migrations in an already-provisioned managed environment. Follow the reviewed process in [DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md).
+
+## Environment and Secrets
+
+Use the deployment platform’s secret-management interface. Do not commit a populated environment file. The runtime requires configuration for the database connection, session/JWT signing, OAuth application and server URLs, managed platform services, and initial owner metadata. In a managed Manus deployment these are supplied through the project configuration.
+
+Do not expose server credentials through browser-visible configuration, source control, client logs, API responses, report snapshots, screenshots, or audit payloads.
+
+## Database Changes
+
+1. Update `drizzle/schema.ts` and generate a migration using `pnpm drizzle-kit generate`.
+2. Read every generated statement and keep migrations additive where practical.
+3. Use TiDB-compatible foreign-key and index names.
+4. Record a database backup/snapshot before applying DDL.
+5. Apply only reviewed SQL through the managed database workflow.
+6. Verify the resulting schema and run `pnpm quality` plus a protected API read-after-write check.
+
+Historical migrations contain manual-application notes. Never blindly replay them against the managed environment.
+
+## Monitoring and Scheduler Operation
 
 ```bash
-pnpm check
-pnpm lint
-pnpm test
-pnpm build
+# One controlled local or preview cycle
+pnpm monitor:once
+
+# Deployed scheduler target after all release gates pass
+POST /api/scheduled/monitoring
 ```
 
-The first dashboard request creates the **AIEM Campus** demonstration dataset in the configured database. This dataset is synthetic and is visibly labelled in the interface.
+The scheduler endpoint derives a tenant-specific task UID and requires platform cron authentication. Activate recurrence only after deployment, deployed health/readiness verification, and a successful controlled trial with persisted monitoring and recovery evidence. See [MONITORING_OPERATIONS_RUNBOOK.md](MONITORING_OPERATIONS_RUNBOOK.md).
 
-## Judge-ready demo flow
+## Health, Readiness, and Security
 
-Open the AIEM Campus dashboard, observe the EcoScore, and select **Run live demo**. EcoSphere AI injects a controlled simulated HVAC spike, calculates its deviation from the trailing baseline, opens a high-severity alert, and refreshes the energy trend. Review the alert centre and ask the AI advisor how to respond. Then use the What-if Sustainability Studio with a 15% energy reduction to compare projected carbon avoidance and savings. The SDG panel shows the resulting contribution signals.
+| Control | Purpose |
+|---|---|
+| `GET /healthz` | Public liveness check. |
+| `GET /readyz` | Public readiness check with database and scheduler disclosure. |
+| `x-request-id` | Correlation identifier for responses and request-completion telemetry. |
+| Security headers | `nosniff`, frame denial, strict referrer policy, permission restrictions, same-origin resource policy; production adds CSP and HSTS. |
+| Safe errors | Scheduled failures return a generic error contract rather than raw exception text. |
 
-> **Important:** The prototype’s electricity emission factor and tariff are disclosed demo constants, not a claim about current local utility tariffs or grid factors. Replace them with a campus-approved methodology before operational use.
+Request telemetry intentionally excludes request bodies, headers, query strings, and raw errors.
 
-## CSV import format
+## Quality and Demonstration
 
-Only sources marked **approved** can ingest telemetry. Use a UTF-8 CSV with the required header fields:
-
-```csv
-timestamp,metric,value,unit
-2026-08-22T09:00:00Z,energy,742,kWh
-2026-08-22T09:00:00Z,water,35,kL
+```bash
+pnpm install --frozen-lockfile
+pnpm quality
 ```
 
-Allowed metrics are `energy`, `water`, `waste`, and `carbon`. Imported data is not labelled as simulated; the source must therefore be approved by the campus owner before it is used in decisions.
+For an AIEM demonstration, use clearly labelled pilot/simulated inputs: open the AIEM Campus overview; trigger a controlled simulated HVAC spike; inspect the persisted anomaly, score, alert, and evidence-linked recommendation; model an intervention in Scenarios; accept it as an action; attach evidence; show report provenance; and explain the deployment-gated scheduler state in Administration.
 
-## Architecture and operations
+## Claim-Safe Language
 
-See [the architecture guide](docs/ARCHITECTURE.md) for the data flow, deterministic calculations, database model, alert lifecycle, and scheduling design. See the [demo runbook](docs/DEMO_RUNBOOK.md) for the recommended presentation sequence and expected observations.
+EcoSphere AI may be described as an **AI-powered, evidence-grounded sustainability operations platform prototype with production-oriented controls**. It must not be described as a live AIEM telemetry deployment, certified carbon-reporting platform, continuously scheduled production service, externally delivered alert system, integrated Odoo deployment, forecast-accuracy guarantee, or savings guarantee until the relevant external evidence exists.
 
-The scheduled monitoring endpoint is included at `/api/scheduled/monitoring`. Its job must be activated only **after** a published deployment exists, using the project owner’s signed-in session. This avoids a scheduler pointing to an unpublished preview environment.
+## Documentation
 
-## Contributing
-
-Please read [CONTRIBUTING.md](CONTRIBUTING.md) before opening an issue or pull request. The project uses small, meaningful commits, deterministic calculations, and mandatory verification for material changes.
+| Document | Purpose |
+|---|---|
+| [DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md) | Publication, migration, scheduler activation, rollback, and release evidence. |
+| [RELEASE_OPERATIONS_RUNBOOK.md](RELEASE_OPERATIONS_RUNBOOK.md) | Release, backup, recovery, and operational controls. |
+| [MONITORING_OPERATIONS_RUNBOOK.md](MONITORING_OPERATIONS_RUNBOOK.md) | Worker health, recovery, routing, and scheduler operations. |
+| [MONITORING_API_AND_WORKER_SPEC.md](MONITORING_API_AND_WORKER_SPEC.md) | Deterministic monitoring contract. |
+| [PRODUCTION_RELEASE_VALIDATION.md](PRODUCTION_RELEASE_VALIDATION.md) | Verified release-candidate journeys and remaining operator gates. |
+| [ACCESSIBILITY_REVIEW.md](ACCESSIBILITY_REVIEW.md) | Implemented accessibility controls and validation boundaries. |
+| [PERFORMANCE_NOTES.md](PERFORMANCE_NOTES.md) | Build-time delivery findings and future measurements. |
 
 ## License
 
-This project is released under the [MIT License](LICENSE).
+This repository declares the MIT license in `package.json`. Confirm final licensing and third-party attribution requirements before a public commercial release.
