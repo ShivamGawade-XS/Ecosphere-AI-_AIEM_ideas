@@ -30,7 +30,7 @@ Select **`main`** as the production branch. Vercel should use the repository con
 | Framework preset | Other / auto-detect. |
 | Install command | `pnpm install --frozen-lockfile` |
 | Build command | `pnpm build` |
-| Output directory | Leave default; the serverless function serves the built `dist/public` directory. |
+| Output directory | `dist/public`, matching the committed `vercel.json` and the verified static client artifact. |
 | Node.js version | 22.x, matching the validated local and GitHub Actions environment. |
 
 ## Environment Variables
