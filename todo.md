@@ -231,3 +231,4 @@
 - [x] Add an authenticated, owner-governed IoT device-management panel that exposes device inventory, registration, lifecycle, and one-time credential rotation feedback without revealing persisted secrets.
 - [x] Remove the unaudited external analytics script and restrict production CSP script/connect sources to first-party application endpoints, with regression validation.
 - [x] Document the application threat model, data classification/retention boundaries, residual risks, and evidence-based security review cadence for the pilot release.
+- [x] Move pnpm patch and override configuration from ignored package metadata into the supported workspace configuration, then verify deterministic installation and quality checks.
