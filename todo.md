@@ -212,7 +212,7 @@
 ## Enterprise Audit and IoT Expansion
 
 - [x] Perform an adversarial repository, deployment, security, reliability, accessibility, and operational-readiness audit with a transparent scorecard.
-- [ ] Remediate all practical high- and medium-severity application-level security and reliability findings, with regression tests and verification evidence.
+- [x] Remediate all practical high- and medium-severity application-level security and reliability findings, with regression tests and verification evidence; configuration-dependent and independent-verification gates remain explicitly pending.
 - [x] Produce a secure IoT integration design covering device identity, gateway or webhook ingestion, validation, tenant mapping, replay protection, observability, and an AIEM Campus pilot path.
 - [x] Re-score the platform after remediation, clearly separating verified improvements from external/operator-dependent gaps.
 - [x] Replace the public key-based managed-storage proxy with an authenticated tenant-scoped access boundary while retaining only explicit public brand assets.
