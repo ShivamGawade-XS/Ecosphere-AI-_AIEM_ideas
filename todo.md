@@ -253,3 +253,4 @@
 - [x] Replace implicit database connection-string initialization with an explicit pooled MySQL/TiDB client and preserve existing readiness behavior through regression verification.
 - [x] Enrich tenant-scoped executive evidence snapshots with bounded target assessments, scenario outputs, and explicit simulated-demo provenance.
 - [x] Make intervention-ranking policy and recommendation confidence evidence explicit in the scenario and intelligence workflows, and add reusable disclosed intervention templates without inventing campus results.
+- [x] Present generated tenant-scoped evidence snapshots in a concise executive report view with explicit modeled, simulated, and non-certification disclosures.

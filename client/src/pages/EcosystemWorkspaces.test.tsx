@@ -102,6 +102,17 @@ describe("authenticated ecosystem workspaces", () => {
     expect(screen.getByText(/410\.0 \/ 500\.0 kWh/)).toBeTruthy();
   });
 
+  it("renders a selected executive report from stored evidence with modeled and simulated disclosures", () => {
+    testApi.reportSnapshots.mockReturnValue(query([{ id: 52, title: "AIEM executive evidence", createdAt: new Date("2026-08-24T00:00:00.000Z"), criteria: { generatedAt: "2026-08-24T00:00:00.000Z", version: "evidence-snapshot-v2" }, factorDisclosure: "Pilot factor disclosure", evidence: { targetAssessments: [{ target: { label: "Energy target", targetType: "energy", targetValue: 500, unit: "kWh" }, achievedValue: 410, assessment: { state: "achieved", freshness: "fresh" } }], scenarios: [{ results: { sdgImpact: { contributions: [{ sdg: 13, title: "Climate Action", contributionIndex: 64 }] } } }], comparisons: [{ id: 1 }], recommendations: [{ id: 2 }], demoSimulation: { explicitlySimulated: true, disclosure: "Guided Campus Simulation evidence is deterministic test data." } } }]));
+    render(<ReportsWorkspace />);
+    fireEvent.click(screen.getByText("View executive evidence"));
+    expect(screen.getByRole("region", { name: "Executive evidence report" })).toBeTruthy();
+    expect(screen.getByText("Energy target")).toBeTruthy();
+    expect(screen.getByText("Climate Action")).toBeTruthy();
+    expect(screen.getByText(/not certified achievement/i)).toBeTruthy();
+    expect(screen.getByText(/Guided Campus Simulation evidence is deterministic test data/)).toBeTruthy();
+  });
+
   it("shows clearly labelled guided simulation controls only to tenant managers and owners", () => {
     const { unmount } = render(<OperationsOverview />);
     expect(screen.getByRole("region", { name: "Guided Campus Simulation" })).toBeTruthy();
