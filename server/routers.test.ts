@@ -66,6 +66,7 @@ const database = vi.hoisted(() => ({
   listSustainabilityTargets: vi.fn(),
   assessSustainabilityTargets: vi.fn(),
   createSustainabilityTarget: vi.fn(),
+  getEvidenceTimeline: vi.fn(),
 }));
 
 vi.mock("./db", () => database);
@@ -171,6 +172,7 @@ describe("EcoSphere core API", () => {
     database.listSustainabilityTargets.mockResolvedValue([]);
     database.assessSustainabilityTargets.mockResolvedValue([]);
     database.createSustainabilityTarget.mockResolvedValue({ id: 301, targetType: "energy", unit: "kWh" });
+    database.getEvidenceTimeline.mockResolvedValue([]);
     worker.runMonitoringForOrganization.mockResolvedValue({ organizationId: 8, runKey: "manual:test-run", status: "completed", readingsScanned: 1, qualityFindingsCreated: 4, anomaliesCreated: 0, alertsCreated: 0, ecoScoresUpdated: 1, latestEcoScore: 100 });
     storage.storagePut.mockResolvedValue({ key: "organizations/8/actions/71/evidence_123.pdf", url: "/manus-storage/organizations/8/actions/71/evidence_123.pdf" });
     demo.getDemoSimulationStatus.mockResolvedValue({ session: null, explicitlySimulated: true });

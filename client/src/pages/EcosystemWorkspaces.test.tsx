@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const testApi = vi.hoisted(() => ({
   organizationsMine: vi.fn(), organizationMembers: vi.fn(), overview: vi.fn(), recentReadings: vi.fn(), actionList: vi.fn(), actionCollaboration: vi.fn(), siteList: vi.fn(), meterList: vi.fn(), iotDevices: vi.fn(),
-  intelligenceReadiness: vi.fn(), monitoringOverview: vi.fn(), monitoringStatus: vi.fn(), monitoringHealth: vi.fn(), demoStatus: vi.fn(), targetAssessment: vi.fn(), administrationStatus: vi.fn(), schedulerTrialStatus: vi.fn(), alertRouting: vi.fn(), deliveryAttempts: vi.fn(), escalationPolicy: vi.fn(), escalations: vi.fn(), forecastList: vi.fn(), recommendationList: vi.fn(), comparisonList: vi.fn(), reportsSummary: vi.fn(), reportSnapshots: vi.fn(), scenarioList: vi.fn(), invalidate: vi.fn().mockResolvedValue(undefined),
+  intelligenceReadiness: vi.fn(), intelligenceTimeline: vi.fn(), monitoringOverview: vi.fn(), monitoringStatus: vi.fn(), monitoringHealth: vi.fn(), demoStatus: vi.fn(), targetAssessment: vi.fn(), administrationStatus: vi.fn(), schedulerTrialStatus: vi.fn(), alertRouting: vi.fn(), deliveryAttempts: vi.fn(), escalationPolicy: vi.fn(), escalations: vi.fn(), forecastList: vi.fn(), recommendationList: vi.fn(), comparisonList: vi.fn(), reportsSummary: vi.fn(), reportSnapshots: vi.fn(), scenarioList: vi.fn(), invalidate: vi.fn().mockResolvedValue(undefined),
   actionCreateMode: "success" as "success" | "error", scenarioPreviewMode: "success" as "success" | "error", scenarioSaveMode: "success" as "success" | "error",
   scenarioPreviewData: undefined as unknown,
 }));
@@ -14,7 +14,7 @@ vi.mock("@/lib/trpc", () => ({
   trpc: {
     useUtils: () => ({
       organizations: { mine: { invalidate: testApi.invalidate }, members: { invalidate: testApi.invalidate } }, sites: { list: { invalidate: testApi.invalidate } }, meters: { list: { invalidate: testApi.invalidate } }, iot: { listDevices: { invalidate: testApi.invalidate } },
-      actions: { list: { invalidate: testApi.invalidate }, collaboration: { invalidate: testApi.invalidate } }, scenarios: { list: { invalidate: testApi.invalidate } }, comparisons: { list: { invalidate: testApi.invalidate } }, forecasts: { list: { invalidate: testApi.invalidate } }, recommendations: { list: { invalidate: testApi.invalidate } }, reports: { snapshots: { invalidate: testApi.invalidate } }, analytics: { overview: { invalidate: testApi.invalidate } }, monitoring: { status: { invalidate: testApi.invalidate }, health: { invalidate: testApi.invalidate } }, demo: { status: { invalidate: testApi.invalidate } }, targets: { assessment: { invalidate: testApi.invalidate } }, schedulerTrial: { status: { invalidate: testApi.invalidate } }, administration: { applicationStatus: { invalidate: testApi.invalidate } }, alertRouting: { get: { invalidate: testApi.invalidate }, deliveries: { invalidate: testApi.invalidate } }, alertEscalation: { get: { invalidate: testApi.invalidate }, list: { invalidate: testApi.invalidate } }, intelligence: { readiness: { invalidate: testApi.invalidate } },
+      actions: { list: { invalidate: testApi.invalidate }, collaboration: { invalidate: testApi.invalidate } }, scenarios: { list: { invalidate: testApi.invalidate } }, comparisons: { list: { invalidate: testApi.invalidate } }, forecasts: { list: { invalidate: testApi.invalidate } }, recommendations: { list: { invalidate: testApi.invalidate } }, reports: { snapshots: { invalidate: testApi.invalidate } }, analytics: { overview: { invalidate: testApi.invalidate } }, monitoring: { status: { invalidate: testApi.invalidate }, health: { invalidate: testApi.invalidate } }, demo: { status: { invalidate: testApi.invalidate } }, targets: { assessment: { invalidate: testApi.invalidate } }, schedulerTrial: { status: { invalidate: testApi.invalidate } }, administration: { applicationStatus: { invalidate: testApi.invalidate } }, alertRouting: { get: { invalidate: testApi.invalidate }, deliveries: { invalidate: testApi.invalidate } }, alertEscalation: { get: { invalidate: testApi.invalidate }, list: { invalidate: testApi.invalidate } }, intelligence: { readiness: { invalidate: testApi.invalidate }, timeline: { invalidate: testApi.invalidate } },
     }),
     organizations: { mine: { useQuery: () => testApi.organizationsMine() }, members: { useQuery: () => testApi.organizationMembers() }, create: { useMutation: () => ({ isPending: false, mutate: vi.fn() }) }, updateMemberRole: { useMutation: () => ({ isPending: false, mutate: vi.fn() }) } },
     operations: { overview: { useQuery: () => testApi.overview() } },
@@ -22,7 +22,7 @@ vi.mock("@/lib/trpc", () => ({
     sites: { list: { useQuery: () => testApi.siteList() }, create: { useMutation: () => ({ isPending: false, mutate: vi.fn() }) } },
     meters: { list: { useQuery: () => testApi.meterList() }, create: { useMutation: () => ({ isPending: false, mutate: vi.fn() }) } },
     iot: { listDevices: { useQuery: () => testApi.iotDevices() }, registerDevice: { useMutation: () => ({ isPending: false, mutate: vi.fn() }) }, rotateDeviceCredential: { useMutation: () => ({ isPending: false, mutate: vi.fn() }) }, updateDeviceStatus: { useMutation: () => ({ isPending: false, mutate: vi.fn() }) } },
-    intelligence: { readiness: { useQuery: () => testApi.intelligenceReadiness() } },
+    intelligence: { readiness: { useQuery: () => testApi.intelligenceReadiness() }, timeline: { useQuery: () => testApi.intelligenceTimeline() } },
     monitoring: { status: { useQuery: () => testApi.monitoringStatus() }, health: { useQuery: () => testApi.monitoringHealth() }, runOnce: { useMutation: () => ({ isPending: false, mutate: vi.fn(), data: undefined, error: null }) }, configureTarget: { useMutation: () => ({ isPending: false, mutate: vi.fn(), error: null }) }, retryRecovery: { useMutation: () => ({ isPending: false, mutate: vi.fn(), error: null }) } },
     demo: { status: { useQuery: () => testApi.demoStatus() }, start: { useMutation: () => ({ isPending: false, mutate: vi.fn(), error: null }) }, advance: { useMutation: () => ({ isPending: false, mutate: vi.fn(), error: null }) }, injectHvacSpike: { useMutation: () => ({ isPending: false, mutate: vi.fn(), error: null }) }, reset: { useMutation: () => ({ isPending: false, mutate: vi.fn(), error: null }) } },
     targets: { assessment: { useQuery: () => testApi.targetAssessment() }, create: { useMutation: (options?: { onSuccess?: () => void }) => ({ isPending: false, mutate: () => options?.onSuccess?.(), error: null }) } },
@@ -64,6 +64,7 @@ describe("authenticated ecosystem workspaces", () => {
     testApi.meterList.mockReturnValue(query([{ id: 44, siteId: 13, displayName: "HVAC Electricity", canonicalUnit: "kWh", resourceType: "energy" }]));
     testApi.iotDevices.mockReturnValue(query([{ id: 201, meterId: 44, deviceKey: "aiem-hvac-gateway-01", displayName: "AIEM HVAC gateway", status: "active", credentialVersion: 1, lastSeenAt: null }]));
     testApi.intelligenceReadiness.mockReturnValue(query({ overview: { meterCount: 2, readingCount: 3 }, pipeline: [{ id: "registry", label: "Meter registry", state: "ready", evidence: "2 registered meters" }, { id: "analytics", label: "Anomaly and forecast worker", state: "planned", evidence: "Requires durable scheduling." }] }));
+    testApi.intelligenceTimeline.mockReturnValue(query([]));
     testApi.monitoringStatus.mockReturnValue(query({ latestRun: null, latestScore: null, openAlertCount: 0 }));
     testApi.demoStatus.mockReturnValue(query({ session: null, explicitlySimulated: true }));
     testApi.targetAssessment.mockReturnValue(query([{ target: { id: 401, targetType: "energy", label: "Monthly energy ceiling", targetValue: "500.0000", unit: "kWh" }, direction: "at_most", achievedValue: 410, latestObservedAt: new Date(), assessment: { state: "achieved", freshness: "fresh", ageHours: 1 } }]));
@@ -113,6 +114,15 @@ describe("authenticated ecosystem workspaces", () => {
     expect(screen.getAllByText(/Guided Campus Simulation evidence is deterministic test data/)).toHaveLength(2);
     expect(screen.getByText("STORED TENANT EVIDENCE — NOT CERTIFIED")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Export selected evidence CSV" }).hasAttribute("disabled")).toBe(false);
+  });
+
+  it("renders only persisted evidence links in the Intelligence traceability timeline", () => {
+    testApi.intelligenceTimeline.mockReturnValue(query([{ id: "recommendation:61", stage: "recommendation", occurredAt: new Date("2026-08-24T12:00:00.000Z"), title: "Inspect HVAC controls", status: "accepted", meterName: "HVAC Electricity", anomalyId: 31, actionId: 72, detail: "Created from persisted anomaly evidence." }]));
+    render(<IntelligenceWorkspace />);
+    expect(screen.getByRole("region", { name: "Evidence traceability timeline" })).toBeTruthy();
+    expect(screen.getByText("Inspect HVAC controls")).toBeTruthy();
+    expect(screen.getByText(/anomaly #31 · action #72/)).toBeTruthy();
+    expect(screen.getByText(/does not fabricate a complete causal chain/i)).toBeTruthy();
   });
 
   it("shows clearly labelled guided simulation controls only to tenant managers and owners", () => {

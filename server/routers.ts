@@ -862,6 +862,12 @@ export const appRouter = router({
           ] as const,
         };
       }),
+    timeline: protectedProcedure
+      .input(z.object({ organizationId: z.number().int().positive() }))
+      .query(async ({ ctx, input }) => {
+        await requireOrganizationRole(ctx.user.id, input.organizationId);
+        return db.getEvidenceTimeline(input.organizationId);
+      }),
   }),
 
   reports: router({

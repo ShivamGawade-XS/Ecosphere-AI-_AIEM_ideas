@@ -52,6 +52,7 @@ import { buildAnomalyRecommendation, RECOMMENDATION_VERSION } from "./domain/rec
 import { INTERVENTION_COMPARISON_VERSION, rankScenarioInterventions } from "./domain/interventionComparison";
 import { materializeReportSnapshot } from "./domain/reportSnapshots";
 import { assessTarget, targetDirectionForType } from "./domain/targetAssessment";
+import { orderEvidenceTimeline } from "./domain/evidenceTimeline";
 
 let databasePool: ReturnType<typeof createPool> | null = null;
 
@@ -1680,6 +1681,24 @@ export async function getMonitoringOverview(organizationId: number) {
     qualityWarnings: qualityFindings.filter((item) => item.finding.status === "warning").length,
     qualityFailures: qualityFindings.filter((item) => item.finding.status === "failed").length,
   };
+}
+
+export async function getEvidenceTimeline(organizationId: number) {
+  const [qualityFindings, anomalies, alerts, recommendations, actions] = await Promise.all([
+    listRecentQualityFindings(organizationId),
+    listRecentAnomalies(organizationId),
+    listRecentMonitoringAlerts(organizationId),
+    listSustainabilityRecommendations(organizationId),
+    listSustainabilityActions(organizationId),
+  ]);
+  const recommendationByActionId = new Map(recommendations.flatMap(({ recommendation }) => recommendation.actionId ? [[recommendation.actionId, recommendation.id] as const] : []));
+  return orderEvidenceTimeline([
+    ...qualityFindings.map(({ finding, meter }) => ({ id: `quality:${finding.id}`, stage: "quality" as const, occurredAt: finding.evaluatedAt, title: `${meter.displayName} quality check`, status: finding.status, meterName: meter.displayName, detail: finding.message })),
+    ...anomalies.map(({ anomaly, meter }) => ({ id: `anomaly:${anomaly.id}`, stage: "anomaly" as const, occurredAt: anomaly.detectedAt, title: `${meter.displayName} deviation`, status: anomaly.status, meterName: meter.displayName, anomalyId: anomaly.id, detail: `Observed ${anomaly.observedValue}; baseline ${anomaly.baselineMean}; z-score ${anomaly.zScore}.` })),
+    ...alerts.map(({ alert, anomaly, meter }) => ({ id: `alert:${alert.id}`, stage: "alert" as const, occurredAt: alert.createdAt, title: alert.title, status: alert.status, meterName: meter.displayName, anomalyId: anomaly.id, detail: alert.message })),
+    ...recommendations.map(({ recommendation, meter }) => ({ id: `recommendation:${recommendation.id}`, stage: "recommendation" as const, occurredAt: recommendation.updatedAt, title: recommendation.title, status: recommendation.status, meterName: meter?.displayName, anomalyId: recommendation.anomalyId ?? undefined, actionId: recommendation.actionId ?? undefined, detail: recommendation.rationale })),
+    ...actions.map((action) => ({ id: `action:${action.id}`, stage: "action" as const, occurredAt: action.updatedAt, title: action.title, status: action.status, actionId: action.id, detail: recommendationByActionId.get(action.id) ? `Created from recommendation #${recommendationByActionId.get(action.id)}.` : "Standalone accountable action." })),
+  ]);
 }
 
 export async function createSustainabilityAction(input: {

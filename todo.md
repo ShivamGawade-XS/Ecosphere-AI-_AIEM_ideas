@@ -259,3 +259,4 @@
 - [x] Make report overview exports and print views snapshot-bound and persistently disclose tenant scope, factor, modeled, and simulated limitations.
 - [x] Verify unauthenticated redirect-path behavior cannot strand users in a protected redirect loop.
 - [x] Bound local MySQL/TiDB connection-pool queueing so a busy process cannot retain unlimited pending database work.
+- [x] Add a tenant-scoped evidence timeline that links persisted monitoring events, recommendations, and accountable actions without fabricating missing lineage.
