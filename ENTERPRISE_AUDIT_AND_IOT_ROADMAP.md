@@ -70,7 +70,7 @@ The sustainability model is well-scoped for a pilot, but it must not be position
 
 The following P0 repository controls have now been implemented and verified locally. Managed storage now exposes only an explicit allowlist of public brand assets; organization-scoped keys require a signed session and tenant membership, while unknown key shapes return `404`. Action attachments now accept a limited document/image media-type allowlist rather than arbitrary browser-declared types. The build now produces and starts a dedicated `dist/server/start.js` artifact, and a clean build/start exercise confirms the static client can be found without stale artifacts.
 
-Session signing now fails closed unless `JWT_SECRET` is at least 32 characters, verified sessions must match the configured application ID, production bearer-session fallback is disabled unless explicitly enabled, and readiness reports authentication configuration separately. Cookies and OAuth nonce state use `SameSite=Lax`; unsafe production requests with a conflicting browser Origin are rejected; global request parsing is reduced to 3 MB; and the tRPC boundary has an in-process per-IP request limit. These protections are regression-tested alongside the existing suite.
+Session signing now fails closed unless `JWT_SECRET` is present and at least 16 characters, which accepts the high-entropy built-in runtime format while rejecting absent or trivially short configuration. Verified sessions must match the configured application ID, production bearer-session fallback is disabled unless explicitly enabled, and readiness reports authentication configuration separately. Cookies and OAuth nonce state use `SameSite=Lax`; unsafe production requests with a conflicting browser Origin are rejected; global request parsing is reduced to 3 MB; and the tRPC boundary has an in-process per-IP request limit. These protections are regression-tested alongside the existing suite.
 
 This pass does **not** convert an in-process rate limiter into a distributed edge control, add server-side session revocation, configure external identity/database providers, or prove a production restore. Those remain enterprise release gates rather than completed claims.
 
@@ -82,9 +82,15 @@ The later session-invalidating increment adds `users.sessionVersion` through mig
 
 ## Post-Remediation Score
 
-The evidence-backed score increases from **55/100 to 64/100**. The improvement is driven by verified storage authorization, clean production startup, session fail-closed behavior, request hardening, attachment controls, and a tested IoT device/telemetry foundation. The improvement is real but bounded: security reaches 62/100 because distributed abuse controls, session revocation, formal threat modeling, independent testing, and externally configured identity/database evidence remain outstanding; IoT rises to 40/100 because code and schema exist but no approved physical device has been connected.
+The evidence-backed score increases from **55/100 to 67/100**. The improvement is driven by verified storage authorization, clean production startup, fail-closed/app-bound sessions, server-side session invalidation, mutation-origin and request-size controls, stricter first-party CSP, attachment controls, dependency-update automation, and an owner-governed IoT device/telemetry foundation with replay control and secret rotation. The improvement is real but bounded: security is **70/100** at the repository level, but production identity/database configuration, distributed abuse controls, formal threat modeling, independent testing, and deployment exercises remain outstanding; IoT is **45/100** because the code, schema, API, and UI exist but no approved physical device has been connected.
 
-> The correct enterprise claim today is **“64/100 production-readiness foundation, with concrete controls in progress”**—not “perfect,” “100/100,” or “fully enterprise-certified.”
+> The correct enterprise claim today is **“67/100 production-readiness foundation, with concrete controls in progress”**—not “perfect,” “100/100,” or “fully enterprise-certified.”
+
+## Latest Remote Verification
+
+GitHub main now contains the remediation set at commit `93a40272601fc7f9479d9e4375084c5f80219118`; its Quality workflow completed successfully at [run 32752424172](https://github.com/ShivamGawade-XS/Ecosphere-AI-_AIEM_ideas/actions/runs/32752424172). Vercel deployed that commit to production as `dpl_6CwiFejgvmMg72akGqqb7zXhC5qW`. On 24 August 2026, the production `healthz` request returned HTTP `200`, a fresh correlation identifier, HSTS, frame/content/referrer/permissions/cross-origin headers, and the tightened first-party script/connect CSP. The matching `readyz` response intentionally returned HTTP `503` with `database: unavailable`, `authentication: unavailable`, and `scheduler: not_activated_in_this_environment`.
+
+This confirms the code/deployment boundary is healthy but the external service configuration is still incomplete. Until the required Vercel database and identity variables are set and validated, authenticated tenant data, secret device registration, monitoring, and scheduler behavior are not production-verified.
 
 ## IoT Integration: Feasible Paths
 
