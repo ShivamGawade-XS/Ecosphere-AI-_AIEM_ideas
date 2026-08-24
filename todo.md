@@ -252,3 +252,4 @@
 - [x] Eliminate repeated unauthenticated/localStorage profile writes from the auth hook while preserving intentional authenticated preview compatibility.
 - [x] Replace implicit database connection-string initialization with an explicit pooled MySQL/TiDB client and preserve existing readiness behavior through regression verification.
 - [x] Enrich tenant-scoped executive evidence snapshots with bounded target assessments, scenario outputs, and explicit simulated-demo provenance.
+- [x] Make intervention-ranking policy and recommendation confidence evidence explicit in the scenario and intelligence workflows, and add reusable disclosed intervention templates without inventing campus results.

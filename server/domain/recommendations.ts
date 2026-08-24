@@ -22,7 +22,7 @@ export type DeterministicRecommendation = {
   rationale: string;
   confidence: number;
   expectedImpact: { excessValue: number; unit: string; carbonOrSavingsEstimate: { excessKgCo2e: number; factorVersion: string; calculationVersion: string } | null; disclosure: string };
-  evidence: { anomalyId: number; baselineMean: number; observedValue: number; excessValue: number; zScore: number; detectedAt: string; qualityStatuses: string[]; forecast: AnomalyEvidenceInput["forecast"]; scenario: AnomalyEvidenceInput["scenario"]; comparison: AnomalyEvidenceInput["comparison"] };
+  evidence: { anomalyId: number; baselineMean: number; observedValue: number; excessValue: number; zScore: number; detectedAt: string; qualityStatuses: string[]; forecast: AnomalyEvidenceInput["forecast"]; scenario: AnomalyEvidenceInput["scenario"]; comparison: AnomalyEvidenceInput["comparison"]; confidenceBasis: { method: "severity-tier-v1"; supportingEvidence: string[]; limitations: string[]; scoreMeaning: string } };
 };
 
 const units: Record<AnomalyEvidenceInput["resourceType"], string> = {
@@ -41,6 +41,20 @@ export function buildAnomalyRecommendation(input: AnomalyEvidenceInput): Determi
     calculationVersion: input.carbon.calculationVersion,
   } : null;
   const priority = input.severity;
+  const confidence = input.severity === "critical" ? 0.9 : input.severity === "high" ? 0.8 : input.severity === "medium" ? 0.7 : 0.6;
+  const supportingEvidence = [
+    `Persisted anomaly severity: ${input.severity}.`,
+    `Observed ${input.observedValue} against a persisted rolling baseline of ${input.baselineMean} (z-score ${input.zScore}).`,
+    ...(input.qualityStatuses?.length ? [`Quality evidence: ${input.qualityStatuses.join(", ")}.`] : []),
+    ...(input.forecast ? [`Forecast evidence: ${input.forecast.calculationVersion} using ${input.forecast.inputReadingCount} readings (${input.forecast.status}).`] : []),
+    ...(input.carbon ? [`Carbon-factor evidence: ${input.carbon.factorVersion} / ${input.carbon.calculationVersion}.`] : []),
+  ];
+  const limitations = [
+    ...(input.qualityStatuses?.length ? [] : ["No persisted quality-status evidence is attached to this recommendation."]),
+    ...(input.forecast ? [] : ["No forecast evidence is attached."]),
+    ...(input.carbon ? [] : ["No persisted carbon factor is attached, so no CO2e estimate is supplied."]),
+    "Confidence is a deterministic severity tier, not a probability of savings or equipment failure.",
+  ];
   const resourceLabel = input.resourceType === "energy" ? "energy" : input.resourceType;
   const action = input.resourceType === "energy"
     ? "Inspect operating schedules, controls, and equipment runtime before approving an intervention."
@@ -50,7 +64,7 @@ export function buildAnomalyRecommendation(input: AnomalyEvidenceInput): Determi
     priority,
     title: `Investigate ${input.meterName} variance`,
     rationale: `${input.meterName} recorded ${input.observedValue} against a historical mean of ${input.baselineMean} (z-score ${input.zScore}). ${action}`,
-    confidence: input.severity === "critical" ? 0.9 : input.severity === "high" ? 0.8 : input.severity === "medium" ? 0.7 : 0.6,
+    confidence,
     expectedImpact: {
       excessValue,
       unit: units[input.resourceType],
@@ -68,6 +82,7 @@ export function buildAnomalyRecommendation(input: AnomalyEvidenceInput): Determi
       forecast: input.forecast ?? null,
       scenario: input.scenario ?? null,
       comparison: input.comparison ?? null,
+      confidenceBasis: { method: "severity-tier-v1", supportingEvidence, limitations, scoreMeaning: `${Math.round(confidence * 100)}% is assigned by the persisted anomaly severity tier (${input.severity}), then contextual evidence and gaps are listed separately.` },
     },
   };
 }

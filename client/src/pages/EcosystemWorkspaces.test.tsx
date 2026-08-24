@@ -265,11 +265,14 @@ describe("authenticated ecosystem workspaces", () => {
     expect(screen.getByText("Comparison #12 linked")).toBeTruthy();
   });
 
-  it("shows recommendation scenario and comparison provenance before acceptance", () => {
-    testApi.recommendationList.mockReturnValue(query([{ recommendation: { id: 19, priority: "high", status: "proposed", title: "Investigate HVAC variance", anomalyId: 12, confidence: "0.8", rationale: "Persisted evidence requires review.", evidence: { scenario: { id: 84, name: "HVAC controls option" }, comparison: { id: 12, name: "HVAC ranked options" } } }, meter: { displayName: "HVAC Electricity" }, action: null }]));
+  it("shows recommendation scenario, comparison, and confidence provenance before acceptance", () => {
+    testApi.recommendationList.mockReturnValue(query([{ recommendation: { id: 19, priority: "high", status: "proposed", title: "Investigate HVAC variance", anomalyId: 12, confidence: "0.8", rationale: "Persisted evidence requires review.", evidence: { scenario: { id: 84, name: "HVAC controls option" }, comparison: { id: 12, name: "HVAC ranked options" }, confidenceBasis: { scoreMeaning: "80% is assigned by the persisted anomaly severity tier.", supportingEvidence: ["Persisted anomaly severity: high."], limitations: ["Confidence is a deterministic severity tier, not a probability of savings or equipment failure."] } } }, meter: { displayName: "HVAC Electricity" }, action: null }]));
     render(<IntelligenceWorkspace />);
     expect(screen.getByText("Modeled scenario #84: HVAC controls option")).toBeTruthy();
     expect(screen.getByText("Comparison #12: HVAC ranked options")).toBeTruthy();
+    fireEvent.click(screen.getByText("Confidence evidence and limits"));
+    expect(screen.getByText("80% is assigned by the persisted anomaly severity tier.")).toBeTruthy();
+    expect(screen.getByText("Persisted anomaly severity: high.")).toBeTruthy();
   });
 
   it("shows a linked tenant action in saved scenario history", () => {
@@ -277,6 +280,15 @@ describe("authenticated ecosystem workspaces", () => {
     testApi.actionList.mockReturnValue(query([{ id: 71, title: "Implement selected controls", status: "proposed", scenarioId: 84, priority: "high", description: null, expectedCarbonReductionKg: null }]));
     render(<ScenarioWorkspace />);
     expect(screen.getByText("Linked action #71: Implement selected controls · proposed")).toBeTruthy();
+  });
+
+  it("applies a disclosed intervention template without overwriting entered baseline values", () => {
+    render(<ScenarioWorkspace />);
+    fireEvent.change(screen.getByLabelText("Baseline energy"), { target: { value: "9100" } });
+    fireEvent.click(screen.getByText("Rooftop solar"));
+    expect((screen.getByLabelText("Baseline energy") as HTMLInputElement).value).toBe("9100");
+    expect((screen.getByLabelText("Renewable share") as HTMLInputElement).value).toBe("35");
+    expect(screen.getByText(/Pilot modeled defaults only; validate roof survey/)).toBeTruthy();
   });
 
   it("covers loading and mutation feedback without concealing server outcomes", async () => {

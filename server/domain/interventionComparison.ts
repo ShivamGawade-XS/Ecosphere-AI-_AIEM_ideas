@@ -1,6 +1,7 @@
 import type { ScenarioResults } from "../../drizzle/schema";
 
-export const INTERVENTION_COMPARISON_VERSION = "scenario-impact-rank-v1" as const;
+export const INTERVENTION_COMPARISON_VERSION = "scenario-impact-rank-v2" as const;
+export const INTERVENTION_RANKING_WEIGHTS = { carbonReduction: 0.45, annualSavings: 0.25, roi: 0.2, investmentEfficiency: 0.1 } as const;
 
 export type ScenarioComparisonInput = { id: number; name: string; assumptions: { investmentInr: number }; results: ScenarioResults };
 export type RankedIntervention = {
@@ -13,6 +14,7 @@ export type RankedIntervention = {
   investmentInr: number;
   roiPct: number | null;
   paybackYears: number | null;
+  scoreComponents: Array<{ key: "carbonReduction" | "annualSavings" | "roi" | "investmentEfficiency"; label: string; weightPct: number; normalizedValue: number; contributionPoints: number }>;
   disclosure: string;
 };
 
@@ -31,7 +33,13 @@ export function rankScenarioInterventions(scenarios: ScenarioComparisonInput[]):
     const investmentEfficiency = scenario.assumptions.investmentInr === 0
       ? (scenario.results.annualSavingsInr > 0 ? 1 : 0)
       : Math.max(0, Math.min(1, scenario.results.annualSavingsInr / scenario.assumptions.investmentInr));
-    const score = round((carbon * 0.45 + savings * 0.25 + roi * 0.2 + investmentEfficiency * 0.1) * 100);
+    const scoreComponents: RankedIntervention["scoreComponents"] = [
+      { key: "carbonReduction", label: "Carbon reduction", weightPct: INTERVENTION_RANKING_WEIGHTS.carbonReduction * 100, normalizedValue: round(carbon), contributionPoints: round(carbon * INTERVENTION_RANKING_WEIGHTS.carbonReduction * 100) },
+      { key: "annualSavings", label: "Annual savings", weightPct: INTERVENTION_RANKING_WEIGHTS.annualSavings * 100, normalizedValue: round(savings), contributionPoints: round(savings * INTERVENTION_RANKING_WEIGHTS.annualSavings * 100) },
+      { key: "roi", label: "Three-year ROI", weightPct: INTERVENTION_RANKING_WEIGHTS.roi * 100, normalizedValue: round(roi), contributionPoints: round(roi * INTERVENTION_RANKING_WEIGHTS.roi * 100) },
+      { key: "investmentEfficiency", label: "Annual savings ÷ investment", weightPct: INTERVENTION_RANKING_WEIGHTS.investmentEfficiency * 100, normalizedValue: round(investmentEfficiency), contributionPoints: round(investmentEfficiency * INTERVENTION_RANKING_WEIGHTS.investmentEfficiency * 100) },
+    ];
+    const score = round(scoreComponents.reduce((total, component) => total + component.contributionPoints, 0));
     return {
       scenarioId: scenario.id,
       name: scenario.name,
@@ -42,7 +50,8 @@ export function rankScenarioInterventions(scenarios: ScenarioComparisonInput[]):
       investmentInr: scenario.assumptions.investmentInr,
       roiPct: scenario.results.roiPct,
       paybackYears: scenario.results.paybackYears,
-      disclosure: `Ranked by ${INTERVENTION_COMPARISON_VERSION}: carbon reduction 45%, annual savings 25%, ROI 20%, and annual-savings-to-investment efficiency 10%. This is a modeled comparison, not a savings guarantee.`,
+      scoreComponents,
+      disclosure: `Ranked by ${INTERVENTION_COMPARISON_VERSION}: carbon reduction 45%, annual savings 25%, ROI 20%, and annual-savings-to-investment efficiency 10%. Component points are normalized only within the selected persisted scenarios. This is a modeled comparison, not a savings guarantee.`,
     };
   }).sort((a, b) => b.score - a.score || b.carbonReductionKg - a.carbonReductionKg || a.scenarioId - b.scenarioId)
     .map((result, index) => ({ ...result, rank: index + 1 }));

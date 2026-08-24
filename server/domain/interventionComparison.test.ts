@@ -23,6 +23,10 @@ describe("rankScenarioInterventions", () => {
 
     expect(ranking.map((item) => [item.name, item.rank])).toEqual([["Solar", 1], ["Controls", 2]]);
     expect(ranking[0].disclosure).toContain("carbon reduction 45%");
+    expect(ranking[0].scoreComponents).toEqual(expect.arrayContaining([
+      expect.objectContaining({ key: "carbonReduction", weightPct: 45, contributionPoints: 45 }),
+      expect.objectContaining({ key: "annualSavings", weightPct: 25, contributionPoints: 25 }),
+    ]));
   });
 
   it("rejects a comparison without two persisted scenarios", () => {

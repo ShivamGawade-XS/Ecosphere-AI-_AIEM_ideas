@@ -32,5 +32,8 @@ describe("buildAnomalyRecommendation", () => {
     expect(recommendation.expectedImpact.carbonOrSavingsEstimate).toEqual({ excessKgCo2e: 21.3, factorVersion: "goa-grid-v1", calculationVersion: "factor-library-carbon-v1" });
     expect(recommendation.evidence).toMatchObject({ qualityStatuses: ["passed", "warning"], forecast: { id: 44, status: "ready" }, scenario: { id: 91, name: "HVAC controls option", carbonReductionKg: 886 }, comparison: { id: 7, name: "Campus HVAC comparison" } });
     expect(recommendation.expectedImpact.disclosure).toContain("persisted factor");
+    expect(recommendation.evidence.confidenceBasis).toMatchObject({ method: "severity-tier-v1" });
+    expect(recommendation.evidence.confidenceBasis.supportingEvidence.join(" ")).toContain("goa-grid-v1");
+    expect(recommendation.evidence.confidenceBasis.limitations).toContain("Confidence is a deterministic severity tier, not a probability of savings or equipment failure.");
   });
 });
