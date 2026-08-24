@@ -232,3 +232,4 @@
 - [x] Remove the unaudited external analytics script and restrict production CSP script/connect sources to first-party application endpoints, with regression validation.
 - [x] Document the application threat model, data classification/retention boundaries, residual risks, and evidence-based security review cadence for the pilot release.
 - [x] Move pnpm patch and override configuration from ignored package metadata into the supported workspace configuration, then verify deterministic installation and quality checks.
+- [x] Remove the unsupported development-only Vite JSX-location plugin and its peer-version warning without changing production application behavior.
