@@ -200,6 +200,23 @@ describe("EcoSphere core API", () => {
     expect(database.ingestReading).toHaveBeenCalledWith(expect.objectContaining({ userId: 17, meterId: 44, observedAt, unit: "kWh" }));
   });
 
+  it("rejects simulated evidence through generic ingestion so only the guided demo service can write resettable fixtures", async () => {
+    const caller = appRouter.createCaller(createAuthenticatedContext());
+
+    await expect(caller.readings.ingest({
+      organizationId: 8,
+      siteId: 13,
+      meterId: 44,
+      observedAt: new Date("2026-08-22T03:00:00.000Z"),
+      value: 112.5,
+      unit: "kWh",
+      source: "simulated",
+      idempotencyKey: "blocked-simulated-ingestion",
+      provenance: { explicitlySimulated: true },
+    })).rejects.toMatchObject<Partial<TRPCError>>({ code: "BAD_REQUEST", message: "Simulated readings are restricted to the Guided Campus Simulation workflow." });
+    expect(database.ingestReading).not.toHaveBeenCalled();
+  });
+
   it("rejects a reading when its unit is inconsistent with the registered meter", async () => {
     const caller = appRouter.createCaller(createAuthenticatedContext());
 

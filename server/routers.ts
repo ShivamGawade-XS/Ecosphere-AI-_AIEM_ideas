@@ -177,6 +177,9 @@ export const appRouter = router({
       }))
       .mutation(async ({ ctx, input }) => {
         await requireOrganizationRole(ctx.user.id, input.organizationId, mutableRoles);
+        if (input.source === "simulated") {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Simulated readings are restricted to the Guided Campus Simulation workflow." });
+        }
         if (input.observedAt.getTime() > Date.now() + 10 * 60 * 1000) {
           throw new TRPCError({ code: "BAD_REQUEST", message: "Observed time cannot be more than ten minutes in the future." });
         }

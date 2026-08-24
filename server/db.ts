@@ -66,7 +66,7 @@ export function createDatabasePoolOptions(uri: string): PoolOptions {
     uri,
     connectionLimit: 5,
     waitForConnections: true,
-    queueLimit: 0,
+    queueLimit: 20,
     enableKeepAlive: true,
     timezone: "Z",
   };

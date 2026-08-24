@@ -11,7 +11,7 @@ vi.mock("@/lib/trpc", () => ({
 }));
 vi.mock("@/const", () => ({ startLogin: vi.fn() }));
 
-import { useAuth } from "./useAuth";
+import { isSafeUnauthenticatedRedirectPath, useAuth } from "./useAuth";
 
 describe("useAuth profile persistence", () => {
   it("does not write an unauthenticated null profile and only persists a real authenticated identity", () => {
@@ -22,5 +22,13 @@ describe("useAuth profile persistence", () => {
     authState.data = { id: 17, name: "AIEM Owner" };
     rerender();
     expect(JSON.parse(localStorage.getItem("manus-runtime-user-info") ?? "{}")).toEqual({ id: 17, name: "AIEM Owner" });
+  });
+
+  it("accepts only local public redirect destinations and rejects protected or same-page loop targets", () => {
+    expect(isSafeUnauthenticatedRedirectPath("/narrative", "/reports")).toBe(true);
+    expect(isSafeUnauthenticatedRedirectPath("/", "/reports")).toBe(true);
+    expect(isSafeUnauthenticatedRedirectPath("/reports", "/overview")).toBe(false);
+    expect(isSafeUnauthenticatedRedirectPath("/narrative", "/narrative")).toBe(false);
+    expect(isSafeUnauthenticatedRedirectPath("https://example.com", "/reports")).toBe(false);
   });
 });

@@ -7,7 +7,7 @@ describe("database pool policy", () => {
       uri: "mysql://user:pass@db.example.test:3306/ecosphere",
       connectionLimit: 5,
       waitForConnections: true,
-      queueLimit: 0,
+      queueLimit: 20,
       enableKeepAlive: true,
       timezone: "Z",
     });

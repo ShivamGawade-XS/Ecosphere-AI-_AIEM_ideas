@@ -8,6 +8,18 @@ type UseAuthOptions = {
   redirectPath?: string;
 };
 
+const publicUnauthenticatedPaths = new Set(["/", "/narrative"]);
+
+export function isSafeUnauthenticatedRedirectPath(redirectPath: string | undefined, currentPath: string): boolean {
+  if (!redirectPath || redirectPath === currentPath || typeof window === "undefined") return false;
+  try {
+    const destination = new URL(redirectPath, window.location.origin);
+    return destination.origin === window.location.origin && publicUnauthenticatedPaths.has(destination.pathname);
+  } catch {
+    return false;
+  }
+}
+
 export function useAuth(options?: UseAuthOptions) {
   // Login is started via startLogin() in the effect below, only when we actually
   // navigate — never during render. startLogin() mints a one-time nonce + writes
@@ -80,11 +92,9 @@ export function useAuth(options?: UseAuthOptions) {
     if (meQuery.isLoading || logoutMutation.isPending) return;
     if (state.user) return;
     if (typeof window === "undefined") return;
-    if (redirectPath && window.location.pathname === redirectPath) return;
-
     // Navigate at this moment only. startLogin() mints the nonce + cookie itself.
-    if (redirectPath) {
-      window.location.href = redirectPath;
+    if (isSafeUnauthenticatedRedirectPath(redirectPath, window.location.pathname)) {
+      window.location.href = redirectPath!;
     } else {
       startLogin();
     }

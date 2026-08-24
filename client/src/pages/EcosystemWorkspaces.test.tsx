@@ -110,7 +110,9 @@ describe("authenticated ecosystem workspaces", () => {
     expect(screen.getByText("Energy target")).toBeTruthy();
     expect(screen.getByText("Climate Action")).toBeTruthy();
     expect(screen.getByText(/not certified achievement/i)).toBeTruthy();
-    expect(screen.getByText(/Guided Campus Simulation evidence is deterministic test data/)).toBeTruthy();
+    expect(screen.getAllByText(/Guided Campus Simulation evidence is deterministic test data/)).toHaveLength(2);
+    expect(screen.getByText("STORED TENANT EVIDENCE — NOT CERTIFIED")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Export selected evidence CSV" }).hasAttribute("disabled")).toBe(false);
   });
 
   it("shows clearly labelled guided simulation controls only to tenant managers and owners", () => {
@@ -295,6 +297,7 @@ describe("authenticated ecosystem workspaces", () => {
 
   it("applies a disclosed intervention template without overwriting entered baseline values", () => {
     render(<ScenarioWorkspace />);
+    expect(screen.getByText(/Site selection is saved as scenario metadata/)).toBeTruthy();
     fireEvent.change(screen.getByLabelText("Baseline energy"), { target: { value: "9100" } });
     fireEvent.click(screen.getByText("Rooftop solar"));
     expect((screen.getByLabelText("Baseline energy") as HTMLInputElement).value).toBe("9100");

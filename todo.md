@@ -254,3 +254,8 @@
 - [x] Enrich tenant-scoped executive evidence snapshots with bounded target assessments, scenario outputs, and explicit simulated-demo provenance.
 - [x] Make intervention-ranking policy and recommendation confidence evidence explicit in the scenario and intelligence workflows, and add reusable disclosed intervention templates without inventing campus results.
 - [x] Present generated tenant-scoped evidence snapshots in a concise executive report view with explicit modeled, simulated, and non-certification disclosures.
+- [x] Restrict simulated readings to guided-demo provenance so generic ingestion cannot contaminate resettable demonstration evidence.
+- [x] Clarify scenario preview scope and ensure the site selector cannot imply a calculation dimension the server does not apply.
+- [x] Make report overview exports and print views snapshot-bound and persistently disclose tenant scope, factor, modeled, and simulated limitations.
+- [x] Verify unauthenticated redirect-path behavior cannot strand users in a protected redirect loop.
+- [x] Bound local MySQL/TiDB connection-pool queueing so a busy process cannot retain unlimited pending database work.

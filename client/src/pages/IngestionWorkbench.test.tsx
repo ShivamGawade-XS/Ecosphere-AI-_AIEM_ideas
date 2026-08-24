@@ -128,7 +128,7 @@ describe("IngestionWorkbench", () => {
     expect(await screen.findByText("This reading was already accepted; duplicate data was not created.")).toBeTruthy();
   });
 
-  it("persists controlled pilot fixtures with an explicit simulated source and provenance label", async () => {
+  it("keeps generic ingestion manual and reserves controlled simulated evidence for the guided demo", async () => {
     queryMocks.organizationsMine.mockReturnValue({ data: [{ organization: { id: 8 } }], isLoading: false, error: null });
     queryMocks.sitesList.mockReturnValue({ data: [{ id: 13, name: "AIEM Main Campus" }], isLoading: false, error: null });
     queryMocks.metersList.mockReturnValue({ data: [{ id: 44, displayName: "HVAC Electricity", canonicalUnit: "kWh" }], isLoading: false, error: null });
@@ -136,11 +136,11 @@ describe("IngestionWorkbench", () => {
     mutationMocks.ingestReading.mockImplementation((options: { onSuccess?: (payload: unknown) => void }) => ({ isPending: false, mutate: (input: Record<string, unknown>) => { submitted = input; options.onSuccess?.({ reading: { id: 100 }, idempotent: false }); } }));
     render(<IngestionWorkbench />);
 
-    fireEvent.change(await screen.findByLabelText("Reading source"), { target: { value: "simulated" } });
     fireEvent.click(screen.getByRole("button", { name: "Ingest reading" }));
 
-    expect(submitted).toMatchObject({ source: "simulated", provenance: { simulated: true, label: "AIEM pilot verification fixture — simulated" } });
-    expect(await screen.findByText("Simulated pilot reading accepted and visibly labeled in provenance.")).toBeTruthy();
+    expect(screen.queryByLabelText("Reading source")).toBeNull();
+    expect(submitted).toMatchObject({ source: "manual", provenance: { entryMethod: "operations-workbench", label: "Manual operational entry" } });
+    expect(await screen.findByText(/Controlled simulated evidence is available only through the Guided Campus Simulation/)).toBeTruthy();
   });
 
   it("renders the protected CSV evidence workflow with an explicit quarantine boundary", () => {
