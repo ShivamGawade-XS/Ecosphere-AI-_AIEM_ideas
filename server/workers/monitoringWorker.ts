@@ -25,6 +25,15 @@ export type MonitoringRunSummary = {
   errorSummary?: string;
 };
 
+/** The detector already discards all but its most recent 30 valid values. */
+export const ANALYTICS_HISTORY_WINDOW = 30;
+
+export function appendBoundedHistory(history: number[], value: number) {
+  history.push(value);
+  if (history.length > ANALYTICS_HISTORY_WINDOW) history.splice(0, history.length - ANALYTICS_HISTORY_WINDOW);
+  return history;
+}
+
 function alertMessage(input: { meterName: string; observedValue: number; baselineMean: number; zScore: number }) {
   return `${input.meterName} recorded ${input.observedValue.toFixed(4)} against a rolling baseline of ${input.baselineMean.toFixed(4)} (z-score ${input.zScore.toFixed(2)}).`;
 }
@@ -162,7 +171,8 @@ export async function runMonitoringForOrganization(input: {
           }
           energyCarbonValues.push(carbon.emittedKgCo2e);
         }
-        histories.set(item.meter.id, [...priorValues, value]);
+        appendBoundedHistory(priorValues, value);
+        histories.set(item.meter.id, priorValues);
       }
     }
 

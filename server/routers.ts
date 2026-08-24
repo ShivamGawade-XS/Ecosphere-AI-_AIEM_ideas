@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { randomBytes } from "node:crypto";
 import { parse as parseCookie } from "cookie";
 import { z } from "zod";
-import { actionPriorities, actionStatuses, anomalySeverities, organizationRoles, readingSources, resourceTypes } from "../drizzle/schema";
+import { actionPriorities, actionStatuses, anomalySeverities, organizationRoles, readingSources, resourceTypes, sustainabilityTargetTypes } from "../drizzle/schema";
 import * as db from "./db";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
@@ -15,6 +15,7 @@ import { previewCsvImport, MAX_CSV_BYTES } from "./domain/csvImport";
 import { storagePut } from "./storage";
 import { createHeartbeatJob, updateHeartbeatJob } from "./_core/heartbeat";
 import { createLivenessPayload, createReadinessResponse } from "./_core/health";
+import { advanceDemoSimulation, getDemoSimulationStatus, injectDemoHvacSpike, resetDemoSimulation, startDemoSimulation } from "./demo/simulation";
 
 const mutableRoles = ["owner", "manager", "operator"] as const;
 const governanceRoles = ["owner", "manager"] as const;
@@ -30,6 +31,7 @@ const permittedAttachmentContentTypes = new Set([
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 ]);
+const targetUnitByType = { energy: "kWh", water: "m³", waste: "kg", carbon: "kgCO2e", ecoscore: "score" } as const;
 
 function requireAuthenticatedSchedulerSession(cookieHeader: string | undefined) {
   const session = parseCookie(cookieHeader ?? "")[COOKIE_NAME];
@@ -338,6 +340,88 @@ export const appRouter = router({
       .query(async ({ ctx, input }) => {
         await requireOrganizationRole(ctx.user.id, input.organizationId);
         return db.getOperationsOverview(input.organizationId);
+      }),
+  }),
+
+  demo: router({
+    status: protectedProcedure
+      .input(z.object({ organizationId: z.number().int().positive() }))
+      .query(async ({ ctx, input }) => {
+        await requireOrganizationRole(ctx.user.id, input.organizationId);
+        return getDemoSimulationStatus(input.organizationId);
+      }),
+    start: protectedProcedure
+      .input(z.object({ organizationId: z.number().int().positive() }))
+      .mutation(async ({ ctx, input }) => {
+        await requireOrganizationRole(ctx.user.id, input.organizationId, governanceRoles);
+        try {
+          return await startDemoSimulation({ organizationId: input.organizationId, userId: ctx.user.id });
+        } catch (error) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "The demo simulation could not be started." });
+        }
+      }),
+    advance: protectedProcedure
+      .input(z.object({ organizationId: z.number().int().positive() }))
+      .mutation(async ({ ctx, input }) => {
+        await requireOrganizationRole(ctx.user.id, input.organizationId, governanceRoles);
+        try {
+          return await advanceDemoSimulation({ organizationId: input.organizationId, userId: ctx.user.id });
+        } catch (error) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "The demo simulation could not be advanced." });
+        }
+      }),
+    injectHvacSpike: protectedProcedure
+      .input(z.object({ organizationId: z.number().int().positive() }))
+      .mutation(async ({ ctx, input }) => {
+        await requireOrganizationRole(ctx.user.id, input.organizationId, governanceRoles);
+        try {
+          return await injectDemoHvacSpike({ organizationId: input.organizationId, userId: ctx.user.id });
+        } catch (error) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "The controlled HVAC spike could not be injected." });
+        }
+      }),
+    reset: protectedProcedure
+      .input(z.object({ organizationId: z.number().int().positive() }))
+      .mutation(async ({ ctx, input }) => {
+        await requireOrganizationRole(ctx.user.id, input.organizationId, governanceRoles);
+        try {
+          return await resetDemoSimulation({ organizationId: input.organizationId, userId: ctx.user.id });
+        } catch (error) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "The demo simulation could not be reset." });
+        }
+      }),
+  }),
+
+  targets: router({
+    list: protectedProcedure
+      .input(z.object({ organizationId: z.number().int().positive() }))
+      .query(async ({ ctx, input }) => {
+        await requireOrganizationRole(ctx.user.id, input.organizationId);
+        return db.listSustainabilityTargets(input.organizationId);
+      }),
+    assessment: protectedProcedure
+      .input(z.object({ organizationId: z.number().int().positive() }))
+      .query(async ({ ctx, input }) => {
+        await requireOrganizationRole(ctx.user.id, input.organizationId);
+        return db.assessSustainabilityTargets(input.organizationId);
+      }),
+    create: protectedProcedure
+      .input(z.object({
+        organizationId: z.number().int().positive(),
+        siteId: z.number().int().positive().optional(),
+        targetType: z.enum(sustainabilityTargetTypes),
+        label: z.string().trim().min(3).max(160),
+        targetValue: z.number().finite().positive().max(999_999_999),
+        windowStart: z.date(),
+        windowEnd: z.date(),
+      }).refine((input) => input.windowEnd > input.windowStart, { path: ["windowEnd"], message: "Target end must be after its start." }))
+      .mutation(async ({ ctx, input }) => {
+        await requireOrganizationRole(ctx.user.id, input.organizationId, governanceRoles);
+        if (input.siteId) {
+          const site = (await db.listSites(input.organizationId)).find((candidate) => candidate.id === input.siteId);
+          if (!site) throw new TRPCError({ code: "BAD_REQUEST", message: "Selected target site is not available in this organization." });
+        }
+        return db.createSustainabilityTarget({ ...input, unit: targetUnitByType[input.targetType], userId: ctx.user.id });
       }),
   }),
 

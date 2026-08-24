@@ -1,4 +1,5 @@
 import type { ScenarioAssumptions, ScenarioResults } from "../../drizzle/schema";
+import { calculateScenarioSdgImpact } from "./sdgImpact";
 
 /**
  * Pilot factor set v1. These are explicitly prototype defaults, not regional
@@ -39,7 +40,7 @@ export function calculateScenario(assumptions: ScenarioAssumptions): ScenarioRes
   const roiPct = assumptions.investmentInr > 0 ? ((annualSavingsInr * 3 - assumptions.investmentInr) / assumptions.investmentInr) * 100 : null;
   const paybackYears = assumptions.investmentInr > 0 && annualSavingsInr > 0 ? assumptions.investmentInr / annualSavingsInr : null;
 
-  return {
+  const resultsWithoutSdg = {
     projectedEnergyKwh: round(projectedEnergyKwh),
     projectedWaterM3: round(projectedWaterM3),
     projectedWasteKg: round(projectedWasteKg),
@@ -50,4 +51,5 @@ export function calculateScenario(assumptions: ScenarioAssumptions): ScenarioRes
     roiPct: roiPct === null ? null : round(roiPct),
     paybackYears: paybackYears === null ? null : round(paybackYears),
   };
+  return { ...resultsWithoutSdg, sdgImpact: calculateScenarioSdgImpact({ assumptions, results: resultsWithoutSdg }) };
 }

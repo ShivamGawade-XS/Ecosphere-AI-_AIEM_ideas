@@ -3,8 +3,9 @@ import React from "react";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+const auth = vi.hoisted(() => ({ state: { loading: false, user: { name: "AIEM Operator", email: "operator@example.test" } as { name: string; email: string } | null, logout: vi.fn() } }));
 vi.mock("@/_core/hooks/useAuth", () => ({
-  useAuth: () => ({ loading: false, user: { name: "AIEM Operator", email: "operator@example.test" }, logout: vi.fn() }),
+  useAuth: () => auth.state,
 }));
 vi.mock("@/hooks/useMobile", () => ({ useIsMobile: () => false }));
 vi.mock("@/const", () => ({ startLogin: vi.fn() }));
@@ -12,7 +13,7 @@ vi.mock("@/const", () => ({ startLogin: vi.fn() }));
 import DashboardLayout from "./DashboardLayout";
 
 describe("DashboardLayout operational index", () => {
-  beforeEach(() => { window.history.replaceState({}, "", "/app"); localStorage.clear(); });
+  beforeEach(() => { window.history.replaceState({}, "", "/app"); localStorage.clear(); auth.state = { loading: false, user: { name: "AIEM Operator", email: "operator@example.test" }, logout: vi.fn() }; });
   afterEach(cleanup);
 
   it("navigates from the ecosystem index into dedicated product routes", async () => {
@@ -34,5 +35,13 @@ describe("DashboardLayout operational index", () => {
     const skipLink = screen.getByRole("link", { name: "Skip to workspace" });
     expect(skipLink.getAttribute("href")).toBe("#workspace-content");
     expect(document.getElementById("workspace-content")?.getAttribute("tabindex")).toBe("-1");
+  });
+
+  it("explains the protected workspace and preserves a public-narrative escape route when signed out", () => {
+    auth.state = { loading: false, user: null, logout: vi.fn() };
+    render(<DashboardLayout><div>Protected content</div></DashboardLayout>);
+    expect(screen.getByRole("heading", { name: "Enter your organization workspace" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Sign in" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Explore the public product narrative" }).getAttribute("href")).toBe("/narrative");
   });
 });

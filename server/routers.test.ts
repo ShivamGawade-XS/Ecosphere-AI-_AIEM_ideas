@@ -63,6 +63,9 @@ const database = vi.hoisted(() => ({
   updateIotDeviceStatus: vi.fn(),
   rotateIotDeviceCredential: vi.fn(),
   incrementUserSessionVersion: vi.fn(),
+  listSustainabilityTargets: vi.fn(),
+  assessSustainabilityTargets: vi.fn(),
+  createSustainabilityTarget: vi.fn(),
 }));
 
 vi.mock("./db", () => database);
@@ -72,6 +75,15 @@ vi.mock("./workers/monitoringWorker", () => worker);
 
 const storage = vi.hoisted(() => ({ storagePut: vi.fn() }));
 vi.mock("./storage", () => storage);
+
+const demo = vi.hoisted(() => ({
+  getDemoSimulationStatus: vi.fn(),
+  startDemoSimulation: vi.fn(),
+  advanceDemoSimulation: vi.fn(),
+  injectDemoHvacSpike: vi.fn(),
+  resetDemoSimulation: vi.fn(),
+}));
+vi.mock("./demo/simulation", () => demo);
 
 import { appRouter } from "./routers";
 
@@ -156,8 +168,16 @@ describe("EcoSphere core API", () => {
     database.updateIotDeviceStatus.mockResolvedValue({ id: 201, status: "suspended" });
     database.rotateIotDeviceCredential.mockResolvedValue({ id: 201, credentialVersion: 2 });
     database.incrementUserSessionVersion.mockResolvedValue({ id: 17, sessionVersion: 2 });
+    database.listSustainabilityTargets.mockResolvedValue([]);
+    database.assessSustainabilityTargets.mockResolvedValue([]);
+    database.createSustainabilityTarget.mockResolvedValue({ id: 301, targetType: "energy", unit: "kWh" });
     worker.runMonitoringForOrganization.mockResolvedValue({ organizationId: 8, runKey: "manual:test-run", status: "completed", readingsScanned: 1, qualityFindingsCreated: 4, anomaliesCreated: 0, alertsCreated: 0, ecoScoresUpdated: 1, latestEcoScore: 100 });
     storage.storagePut.mockResolvedValue({ key: "organizations/8/actions/71/evidence_123.pdf", url: "/manus-storage/organizations/8/actions/71/evidence_123.pdf" });
+    demo.getDemoSimulationStatus.mockResolvedValue({ session: null, explicitlySimulated: true });
+    demo.startDemoSimulation.mockResolvedValue({ stage: "started", session: { id: 42, status: "running", cycle: 0 }, explicitlySimulated: true, readingsAccepted: 6 });
+    demo.advanceDemoSimulation.mockResolvedValue({ stage: "cycle_advanced", session: { id: 42, status: "running", cycle: 1 }, explicitlySimulated: true, readingsAccepted: 3 });
+    demo.injectDemoHvacSpike.mockResolvedValue({ stage: "spike_injected", session: { id: 42, status: "spike_injected", cycle: 1 }, explicitlySimulated: true, readingsAccepted: 1 });
+    demo.resetDemoSimulation.mockResolvedValue({ stage: "reset", session: { id: 42, status: "reset", cycle: 1 }, explicitlySimulated: true, readingsAccepted: 0, resetSummary: { supersededReadingCount: 10, resolvedAlertCount: 1, resolvedAnomalyCount: 1 } });
   });
 
   it("persists an authenticated reading with a server-owned user identifier", async () => {
@@ -566,5 +586,46 @@ describe("EcoSphere core API", () => {
     const result = await caller.monitoring.retryRecovery({ organizationId: 8, recoveryEventId: 9 });
     expect(result).toMatchObject({ recovery: { id: 9, started: false }, run: null });
     expect(worker.runMonitoringForOrganization).not.toHaveBeenCalled();
+  });
+
+  it("keeps guided demo controls behind tenant governance roles while exposing read-only session status to members", async () => {
+    const caller = appRouter.createCaller(createAuthenticatedContext());
+    const status = await caller.demo.status({ organizationId: 8 });
+    expect(status).toEqual({ session: null, explicitlySimulated: true });
+    expect(demo.getDemoSimulationStatus).toHaveBeenCalledWith(8);
+    await expect(caller.demo.start({ organizationId: 8 })).rejects.toMatchObject<Partial<TRPCError>>({ code: "FORBIDDEN" });
+
+    database.getOrganizationMembership.mockResolvedValue({ organizationId: 8, userId: 17, role: "manager" });
+    const started = await caller.demo.start({ organizationId: 8 });
+    const advanced = await caller.demo.advance({ organizationId: 8 });
+    const spike = await caller.demo.injectHvacSpike({ organizationId: 8 });
+    const reset = await caller.demo.reset({ organizationId: 8 });
+    expect(started).toMatchObject({ stage: "started", explicitlySimulated: true });
+    expect(advanced).toMatchObject({ stage: "cycle_advanced", readingsAccepted: 3 });
+    expect(spike).toMatchObject({ stage: "spike_injected", readingsAccepted: 1 });
+    expect(reset).toMatchObject({ stage: "reset", resetSummary: { supersededReadingCount: 10 } });
+    expect(demo.startDemoSimulation).toHaveBeenCalledWith({ organizationId: 8, userId: 17 });
+    expect(demo.advanceDemoSimulation).toHaveBeenCalledWith({ organizationId: 8, userId: 17 });
+    expect(demo.injectDemoHvacSpike).toHaveBeenCalledWith({ organizationId: 8, userId: 17 });
+    expect(demo.resetDemoSimulation).toHaveBeenCalledWith({ organizationId: 8, userId: 17 });
+
+    database.getOrganizationMembership.mockResolvedValueOnce(undefined);
+    await expect(caller.demo.status({ organizationId: 9 })).rejects.toMatchObject<Partial<TRPCError>>({ code: "FORBIDDEN" });
+    expect(demo.getDemoSimulationStatus).not.toHaveBeenCalledWith(9);
+  });
+
+  it("keeps target assessment tenant-scoped and derives canonical units server-side", async () => {
+    const caller = appRouter.createCaller(createAuthenticatedContext());
+    expect(await caller.targets.list({ organizationId: 8 })).toEqual([]);
+    expect(await caller.targets.assessment({ organizationId: 8 })).toEqual([]);
+    await expect(caller.targets.create({ organizationId: 8, targetType: "energy", label: "Weekly energy ceiling", targetValue: 500, windowStart: new Date("2026-08-01T00:00:00.000Z"), windowEnd: new Date("2026-08-31T00:00:00.000Z") })).rejects.toMatchObject<Partial<TRPCError>>({ code: "FORBIDDEN" });
+
+    database.getOrganizationMembership.mockResolvedValue({ organizationId: 8, userId: 17, role: "manager" });
+    const created = await caller.targets.create({ organizationId: 8, siteId: 13, targetType: "energy", label: "Weekly energy ceiling", targetValue: 500, windowStart: new Date("2026-08-01T00:00:00.000Z"), windowEnd: new Date("2026-08-31T00:00:00.000Z") });
+    expect(created).toMatchObject({ id: 301, unit: "kWh" });
+    expect(database.createSustainabilityTarget).toHaveBeenCalledWith(expect.objectContaining({ organizationId: 8, siteId: 13, targetType: "energy", unit: "kWh", userId: 17 }));
+
+    database.listSites.mockResolvedValue([]);
+    await expect(caller.targets.create({ organizationId: 8, siteId: 99, targetType: "water", label: "Water ceiling", targetValue: 50, windowStart: new Date("2026-08-01T00:00:00.000Z"), windowEnd: new Date("2026-08-31T00:00:00.000Z") })).rejects.toMatchObject<Partial<TRPCError>>({ code: "BAD_REQUEST" });
   });
 });

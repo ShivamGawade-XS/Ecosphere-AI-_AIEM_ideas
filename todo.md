@@ -240,3 +240,15 @@
 - [x] Validate storage object-key paths centrally and prevent upstream presign response bodies from being surfaced through application errors.
 - [x] Tighten the production CSP with explicit object, worker, manifest, and script-attribute restrictions after confirming the current client origin inventory.
 - [x] Remove the restrictive mobile viewport scale cap so users can zoom content for accessibility without affecting responsive layout behavior.
+- [x] Produce a fresh adversarial audit of product functionality, intelligence quality, workflows, security, reliability, accessibility, performance, and test coverage; document the transparent baseline score and evidence.
+- [x] Fix OAuth state-cookie lifecycle consistency and replace brittle string-based automatic login redirects with structured unauthorized handling.
+- [x] Build a deterministic, clearly labeled Live Demo Simulation control flow with campus setup, recurring test-cycle ingestion, controlled HVAC-spike injection, pipeline refresh, and reset safeguards.
+- [x] Add an executive SDG-impact evidence view and connect server-calculated scenario and action impacts to SDG 7, 9, 11, 12, and 13 disclosures.
+- [x] Remove monitoring-worker quadratic per-meter history copying and cap deterministic analytics history without changing anomaly semantics.
+- [x] Improve product entry, mutation announcements, and missing-asset fallback behavior for a resilient judge-facing demonstration flow.
+- [x] Add tenant/site sustainability targets with deterministic energy, water, waste, carbon, and EcoScore attainment status plus explicit data-freshness evidence in the executive overview.
+- [x] Harden OAuth state serialization and cookie clearing with a base64url-safe, UTF-8-aware contract and matched secure lifecycle options.
+- [x] Normalize target date-window inputs to explicit UTC boundaries so assessment windows do not shift with browser/server timezone or daylight-saving changes.
+- [x] Eliminate repeated unauthenticated/localStorage profile writes from the auth hook while preserving intentional authenticated preview compatibility.
+- [x] Replace implicit database connection-string initialization with an explicit pooled MySQL/TiDB client and preserve existing readiness behavior through regression verification.
+- [x] Enrich tenant-scoped executive evidence snapshots with bounded target assessments, scenario outputs, and explicit simulated-demo provenance.

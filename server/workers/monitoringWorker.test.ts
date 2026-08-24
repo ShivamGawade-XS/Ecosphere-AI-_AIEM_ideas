@@ -21,7 +21,7 @@ const database = vi.hoisted(() => ({
 
 vi.mock("../db", () => database);
 
-import { runMonitoringForOrganization } from "./monitoringWorker";
+import { ANALYTICS_HISTORY_WINDOW, appendBoundedHistory, runMonitoringForOrganization } from "./monitoringWorker";
 
 function reading(id: number, value: number, minute: number) {
   return {
@@ -45,6 +45,16 @@ describe("monitoring worker", () => {
 
     expect(result).toMatchObject({ status: "skipped", readingsScanned: 4, latestEcoScore: 72 });
     expect(database.listReadingsForMonitoring).not.toHaveBeenCalled();
+  });
+
+  it("retains only the exact detector window with a stable in-place history reference", () => {
+    const history: number[] = [];
+    const reference = history;
+    for (let value = 1; value <= ANALYTICS_HISTORY_WINDOW + 12; value += 1) appendBoundedHistory(history, value);
+    expect(history).toBe(reference);
+    expect(history).toHaveLength(ANALYTICS_HISTORY_WINDOW);
+    expect(history[0]).toBe(13);
+    expect(history.at(-1)).toBe(ANALYTICS_HISTORY_WINDOW + 12);
   });
 
   it("persists quality, carbon, a score snapshot, and a completed summary for unprocessed readings", async () => {

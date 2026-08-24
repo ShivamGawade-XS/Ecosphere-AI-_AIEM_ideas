@@ -41,6 +41,9 @@ export const forecastStatuses = ["ready", "insufficient_data"] as const;
 export const recommendationStatuses = ["proposed", "accepted", "dismissed", "archived"] as const;
 export const actionEvidenceTypes = ["note", "url", "attachment"] as const;
 export const reportSnapshotStatuses = ["generated", "archived"] as const;
+export const demoSimulationStatuses = ["running", "spike_injected", "reset"] as const;
+export const sustainabilityTargetTypes = ["energy", "water", "waste", "carbon", "ecoscore"] as const;
+export const sustainabilityTargetStatuses = ["active", "archived"] as const;
 
 export type ScenarioAssumptions = {
   baselineEnergyKwh: number;
@@ -64,6 +67,7 @@ export type ScenarioResults = {
   annualSavingsInr: number;
   roiPct: number | null;
   paybackYears: number | null;
+  sdgImpact?: import("../server/domain/sdgImpact").SdgImpact;
 };
 
 export const users = mysqlTable("users", {
@@ -237,6 +241,57 @@ export const sustainabilityReadings = mysqlTable(
     uniqueIndex("readings_meter_key_unique").on(table.meterId, table.idempotencyKey),
     index("readings_org_observed_idx").on(table.organizationId, table.observedAt),
     index("readings_meter_observed_idx").on(table.meterId, table.observedAt),
+  ],
+);
+
+/**
+ * Tenant-scoped state for a clearly labelled, bounded AIEM demonstration.
+ * Demo readings carry matching provenance and are reset separately from
+ * operator-entered and connector evidence.
+ */
+export const demoSimulationSessions = mysqlTable(
+  "demo_simulation_sessions",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    organizationId: int("organizationId").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    siteId: int("siteId").references(() => sites.id, { onDelete: "set null" }),
+    status: mysqlEnum("status", demoSimulationStatuses).notNull().default("running"),
+    cycle: int("cycle").notNull().default(0),
+    anchorObservedAt: timestamp("anchorObservedAt").notNull(),
+    createdByUserId: int("createdByUserId").references(() => users.id, { onDelete: "set null" }),
+    spikeInjectedAt: timestamp("spikeInjectedAt"),
+    resetAt: timestamp("resetAt"),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  (table) => [
+    index("demo_sessions_org_status_idx").on(table.organizationId, table.status),
+    index("demo_sessions_org_created_idx").on(table.organizationId, table.createdAt),
+  ],
+);
+
+/** A time-bounded, tenant- or site-scoped operational target. */
+export const sustainabilityTargets = mysqlTable(
+  "sustainability_targets",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    organizationId: int("organizationId").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    siteId: int("siteId").references(() => sites.id, { onDelete: "set null" }),
+    targetType: mysqlEnum("targetType", sustainabilityTargetTypes).notNull(),
+    label: varchar("label", { length: 160 }).notNull(),
+    targetValue: decimal("targetValue", { precision: 16, scale: 4 }).notNull(),
+    unit: varchar("unit", { length: 24 }).notNull(),
+    windowStart: timestamp("windowStart").notNull(),
+    windowEnd: timestamp("windowEnd").notNull(),
+    status: mysqlEnum("status", sustainabilityTargetStatuses).notNull().default("active"),
+    createdByUserId: int("createdByUserId").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  (table) => [
+    index("targets_org_status_idx").on(table.organizationId, table.status),
+    index("targets_org_window_idx").on(table.organizationId, table.windowStart, table.windowEnd),
+    index("targets_site_idx").on(table.siteId),
   ],
 );
 

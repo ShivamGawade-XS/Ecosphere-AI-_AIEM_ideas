@@ -48,3 +48,8 @@ export function getSessionCookieOptions(
     secure: isSecureRequest(req),
   };
 }
+
+/** Must match the browser-created one-time OAuth nonce cookie on callback cleanup. */
+export function getOAuthStateCookieOptions(req: Request): Pick<CookieOptions, "path" | "sameSite" | "secure"> {
+  return { path: "/", sameSite: "lax", secure: isSecureRequest(req) };
+}

@@ -1,5 +1,6 @@
-import { and, count, desc, eq, isNull, sql, sum } from "drizzle-orm";
+import { and, count, desc, eq, gte, inArray, isNull, lte, max, sql, sum } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
+import { createPool, type PoolOptions } from "mysql2/promise";
 import { nanoid } from "nanoid";
 import { createHash, timingSafeEqual } from "node:crypto";
 import {
@@ -13,6 +14,7 @@ import {
   dataImportFiles,
   dataImportRows,
   dataQualityFindings,
+  demoSimulationSessions,
   ecoScoreSnapshots,
   emissionFactors,
   ingestionBatches,
@@ -36,6 +38,7 @@ import {
   interventionComparisons,
   sustainabilityReportSnapshots,
   sustainabilityScenarios,
+  sustainabilityTargets,
   type ScenarioAssumptions,
   type ScenarioResults,
   type InsertUser,
@@ -48,13 +51,32 @@ import { buildMovingAverageForecast, FORECAST_CALCULATION_VERSION } from "./doma
 import { buildAnomalyRecommendation, RECOMMENDATION_VERSION } from "./domain/recommendations";
 import { INTERVENTION_COMPARISON_VERSION, rankScenarioInterventions } from "./domain/interventionComparison";
 import { materializeReportSnapshot } from "./domain/reportSnapshots";
+import { assessTarget, targetDirectionForType } from "./domain/targetAssessment";
 
-let databaseInstance: ReturnType<typeof drizzle> | null = null;
+let databasePool: ReturnType<typeof createPool> | null = null;
+
+function createDatabaseClient(pool: ReturnType<typeof createPool>) {
+  return drizzle({ client: pool });
+}
+
+let databaseInstance: ReturnType<typeof createDatabaseClient> | null = null;
+
+export function createDatabasePoolOptions(uri: string): PoolOptions {
+  return {
+    uri,
+    connectionLimit: 5,
+    waitForConnections: true,
+    queueLimit: 0,
+    enableKeepAlive: true,
+    timezone: "Z",
+  };
+}
 
 export async function getDb() {
   if (!databaseInstance && process.env.DATABASE_URL) {
     try {
-      databaseInstance = drizzle(process.env.DATABASE_URL);
+      databasePool = databasePool ?? createPool(createDatabasePoolOptions(process.env.DATABASE_URL));
+      databaseInstance = createDatabaseClient(databasePool);
     } catch (error) {
       console.warn("[Database] Failed to create connection:", error);
       databaseInstance = null;
@@ -276,6 +298,245 @@ export async function listMeters(organizationId: number, siteId?: number) {
     ? and(eq(meters.organizationId, organizationId), eq(meters.siteId, siteId))
     : eq(meters.organizationId, organizationId);
   return database.select().from(meters).where(predicate).orderBy(meters.displayName);
+}
+
+export async function getActiveDemoSimulationSession(organizationId: number) {
+  const database = await requireDb();
+  const result = await database
+    .select()
+    .from(demoSimulationSessions)
+    .where(and(
+      eq(demoSimulationSessions.organizationId, organizationId),
+      inArray(demoSimulationSessions.status, ["running", "spike_injected"]),
+    ))
+    .orderBy(desc(demoSimulationSessions.updatedAt))
+    .limit(1);
+  return result[0] ?? null;
+}
+
+export async function getLatestDemoSimulationSession(organizationId: number) {
+  const database = await requireDb();
+  const result = await database
+    .select()
+    .from(demoSimulationSessions)
+    .where(eq(demoSimulationSessions.organizationId, organizationId))
+    .orderBy(desc(demoSimulationSessions.updatedAt))
+    .limit(1);
+  return result[0] ?? null;
+}
+
+export async function createDemoSimulationSession(input: {
+  organizationId: number;
+  siteId: number;
+  anchorObservedAt: Date;
+  userId: number;
+}) {
+  const database = await requireDb();
+  return database.transaction(async (tx) => {
+    const [created] = await tx.insert(demoSimulationSessions).values({
+      organizationId: input.organizationId,
+      siteId: input.siteId,
+      anchorObservedAt: input.anchorObservedAt,
+      createdByUserId: input.userId,
+    }).$returningId();
+    await tx.insert(auditEvents).values({
+      organizationId: input.organizationId,
+      actorUserId: input.userId,
+      eventType: "demo_simulation.started",
+      resourceType: "demo_simulation_session",
+      resourceId: String(created.id),
+      payload: { siteId: input.siteId, simulationVersion: "aiem-campus-demo-v1", explicitlySimulated: true },
+    });
+    const [session] = await tx.select().from(demoSimulationSessions).where(eq(demoSimulationSessions.id, created.id)).limit(1);
+    return session;
+  });
+}
+
+export async function advanceDemoSimulationSession(input: { organizationId: number; sessionId: number; cycle: number; userId: number }) {
+  const database = await requireDb();
+  const [session] = await database.select().from(demoSimulationSessions)
+    .where(and(eq(demoSimulationSessions.id, input.sessionId), eq(demoSimulationSessions.organizationId, input.organizationId))).limit(1);
+  if (!session || session.status !== "running") return null;
+  await database.update(demoSimulationSessions).set({ cycle: input.cycle, updatedAt: new Date() })
+    .where(eq(demoSimulationSessions.id, input.sessionId));
+  await database.insert(auditEvents).values({
+    organizationId: input.organizationId,
+    actorUserId: input.userId,
+    eventType: "demo_simulation.cycle_advanced",
+    resourceType: "demo_simulation_session",
+    resourceId: String(input.sessionId),
+    payload: { cycle: input.cycle, explicitlySimulated: true },
+  });
+  return { ...session, cycle: input.cycle };
+}
+
+export async function markDemoSimulationSpikeInjected(input: { organizationId: number; sessionId: number; userId: number; injectedAt: Date }) {
+  const database = await requireDb();
+  const [session] = await database.select().from(demoSimulationSessions)
+    .where(and(eq(demoSimulationSessions.id, input.sessionId), eq(demoSimulationSessions.organizationId, input.organizationId))).limit(1);
+  if (!session || session.status !== "running") return null;
+  await database.update(demoSimulationSessions).set({ status: "spike_injected", spikeInjectedAt: input.injectedAt, updatedAt: new Date() })
+    .where(eq(demoSimulationSessions.id, input.sessionId));
+  await database.insert(auditEvents).values({
+    organizationId: input.organizationId,
+    actorUserId: input.userId,
+    eventType: "demo_simulation.hvac_spike_injected",
+    resourceType: "demo_simulation_session",
+    resourceId: String(input.sessionId),
+    payload: { explicitlySimulated: true, value: 260, unit: "kWh" },
+  });
+  return { ...session, status: "spike_injected" as const, spikeInjectedAt: input.injectedAt };
+}
+
+/**
+ * Archives only the specified session's simulated evidence. Readings are
+ * superseded rather than destroyed, while alerts/anomalies/recommendations are
+ * resolved or archived so they cannot pollute the next demo run.
+ */
+export async function resetDemoSimulationSession(input: { organizationId: number; sessionId: number; userId: number }) {
+  const database = await requireDb();
+  const now = new Date();
+  return database.transaction(async (tx) => {
+    const [session] = await tx.select().from(demoSimulationSessions)
+      .where(and(eq(demoSimulationSessions.id, input.sessionId), eq(demoSimulationSessions.organizationId, input.organizationId))).limit(1);
+    if (!session || session.status === "reset") return null;
+
+    const readings = await tx.select({ id: sustainabilityReadings.id }).from(sustainabilityReadings)
+      .where(and(
+        eq(sustainabilityReadings.organizationId, input.organizationId),
+        eq(sustainabilityReadings.source, "simulated"),
+        eq(sustainabilityReadings.sourceReference, `demo-session:${input.sessionId}`),
+        isNull(sustainabilityReadings.supersededAt),
+      ));
+    const readingIds = readings.map((reading) => reading.id);
+    let anomalyIds: number[] = [];
+    let alertCount = 0;
+
+    if (readingIds.length) {
+      const anomalies = await tx.select({ id: anomalyEvents.id }).from(anomalyEvents)
+        .where(and(eq(anomalyEvents.organizationId, input.organizationId), inArray(anomalyEvents.readingId, readingIds)));
+      anomalyIds = anomalies.map((anomaly) => anomaly.id);
+      if (anomalyIds.length) {
+        const alerts = await tx.select({ id: monitoringAlerts.id }).from(monitoringAlerts)
+          .where(and(eq(monitoringAlerts.organizationId, input.organizationId), inArray(monitoringAlerts.anomalyId, anomalyIds)));
+        alertCount = alerts.length;
+        await tx.update(monitoringAlerts).set({ status: "resolved", resolvedAt: now })
+          .where(and(eq(monitoringAlerts.organizationId, input.organizationId), inArray(monitoringAlerts.anomalyId, anomalyIds)));
+        await tx.update(anomalyEvents).set({ status: "resolved", resolvedAt: now })
+          .where(and(eq(anomalyEvents.organizationId, input.organizationId), inArray(anomalyEvents.id, anomalyIds)));
+        await tx.update(sustainabilityRecommendations).set({ status: "archived", updatedAt: now })
+          .where(and(eq(sustainabilityRecommendations.organizationId, input.organizationId), inArray(sustainabilityRecommendations.anomalyId, anomalyIds)));
+      }
+      await tx.update(sustainabilityReadings).set({ supersededAt: now, qualityStatus: "flagged", qualityReason: "Demo session reset; simulated evidence superseded." })
+        .where(and(eq(sustainabilityReadings.organizationId, input.organizationId), inArray(sustainabilityReadings.id, readingIds)));
+    }
+
+    await tx.update(demoSimulationSessions).set({ status: "reset", resetAt: now, updatedAt: now })
+      .where(eq(demoSimulationSessions.id, input.sessionId));
+    await tx.insert(auditEvents).values({
+      organizationId: input.organizationId,
+      actorUserId: input.userId,
+      eventType: "demo_simulation.reset",
+      resourceType: "demo_simulation_session",
+      resourceId: String(input.sessionId),
+      payload: { supersededReadingCount: readingIds.length, resolvedAlertCount: alertCount, explicitlySimulated: true },
+    });
+    return { sessionId: input.sessionId, supersededReadingCount: readingIds.length, resolvedAlertCount: alertCount, resolvedAnomalyCount: anomalyIds.length };
+  });
+}
+
+export async function createSustainabilityTarget(input: {
+  organizationId: number;
+  siteId?: number;
+  targetType: "energy" | "water" | "waste" | "carbon" | "ecoscore";
+  label: string;
+  targetValue: number;
+  unit: string;
+  windowStart: Date;
+  windowEnd: Date;
+  userId: number;
+}) {
+  const database = await requireDb();
+  return database.transaction(async (tx) => {
+    const [created] = await tx.insert(sustainabilityTargets).values({
+      organizationId: input.organizationId,
+      siteId: input.siteId ?? null,
+      targetType: input.targetType,
+      label: input.label,
+      targetValue: input.targetValue.toFixed(4),
+      unit: input.unit,
+      windowStart: input.windowStart,
+      windowEnd: input.windowEnd,
+      createdByUserId: input.userId,
+    }).$returningId();
+    await tx.insert(auditEvents).values({
+      organizationId: input.organizationId,
+      actorUserId: input.userId,
+      eventType: "sustainability_target.created",
+      resourceType: "sustainability_target",
+      resourceId: String(created.id),
+      payload: { targetType: input.targetType, targetValue: input.targetValue, unit: input.unit, windowStart: input.windowStart.toISOString(), windowEnd: input.windowEnd.toISOString(), siteId: input.siteId ?? null },
+    });
+    const [target] = await tx.select().from(sustainabilityTargets).where(eq(sustainabilityTargets.id, created.id)).limit(1);
+    return target;
+  });
+}
+
+export async function listSustainabilityTargets(organizationId: number) {
+  const database = await requireDb();
+  return database.select().from(sustainabilityTargets)
+    .where(eq(sustainabilityTargets.organizationId, organizationId))
+    .orderBy(desc(sustainabilityTargets.windowEnd), desc(sustainabilityTargets.createdAt));
+}
+
+export async function assessSustainabilityTargets(organizationId: number, now = new Date()) {
+  const database = await requireDb();
+  const targets = await database.select().from(sustainabilityTargets)
+    .where(and(eq(sustainabilityTargets.organizationId, organizationId), eq(sustainabilityTargets.status, "active")))
+    .orderBy(sustainabilityTargets.windowEnd);
+
+  return Promise.all(targets.map(async (target) => {
+    const readingPredicates = [
+      eq(sustainabilityReadings.organizationId, organizationId),
+      isNull(sustainabilityReadings.supersededAt),
+      eq(sustainabilityReadings.qualityStatus, "accepted"),
+      gte(sustainabilityReadings.observedAt, target.windowStart),
+      lte(sustainabilityReadings.observedAt, target.windowEnd),
+      ...(target.siteId ? [eq(sustainabilityReadings.siteId, target.siteId)] : []),
+    ];
+    let achievedValue: number | null = null;
+    let latestObservedAt: Date | null = null;
+
+    if (target.targetType === "energy" || target.targetType === "water" || target.targetType === "waste") {
+      const [aggregate] = await database.select({ value: sum(sustainabilityReadings.value), latestObservedAt: max(sustainabilityReadings.observedAt) })
+        .from(sustainabilityReadings)
+        .innerJoin(meters, eq(sustainabilityReadings.meterId, meters.id))
+        .where(and(...readingPredicates, eq(meters.resourceType, target.targetType)));
+      achievedValue = aggregate?.value == null ? null : Number(aggregate.value);
+      latestObservedAt = aggregate?.latestObservedAt ?? null;
+    } else if (target.targetType === "carbon") {
+      const [aggregate] = await database.select({ value: sum(carbonCalculations.emittedKgCo2e), latestObservedAt: max(sustainabilityReadings.observedAt) })
+        .from(carbonCalculations)
+        .innerJoin(sustainabilityReadings, eq(carbonCalculations.readingId, sustainabilityReadings.id))
+        .where(and(...readingPredicates));
+      achievedValue = aggregate?.value == null ? null : Number(aggregate.value);
+      latestObservedAt = aggregate?.latestObservedAt ?? null;
+    } else {
+      const scorePredicates = [
+        eq(ecoScoreSnapshots.organizationId, organizationId),
+        gte(ecoScoreSnapshots.computedAt, target.windowStart),
+        lte(ecoScoreSnapshots.computedAt, target.windowEnd),
+        ...(target.siteId ? [eq(ecoScoreSnapshots.siteId, target.siteId)] : []),
+      ];
+      const [latestScore] = await database.select().from(ecoScoreSnapshots).where(and(...scorePredicates)).orderBy(desc(ecoScoreSnapshots.computedAt)).limit(1);
+      achievedValue = latestScore?.score ?? null;
+      latestObservedAt = latestScore?.computedAt ?? null;
+    }
+
+    const direction = targetDirectionForType(target.targetType);
+    const assessment = assessTarget({ targetValue: Number(target.targetValue), achievedValue, direction, latestObservedAt, now });
+    return { target, direction, achievedValue, latestObservedAt, assessment };
+  }));
 }
 
 export async function getMeterById(organizationId: number, meterId: number) {
@@ -1788,15 +2049,18 @@ export async function listInterventionComparisons(organizationId: number) {
 
 export async function createSustainabilityReportSnapshot(input: { organizationId: number; title: string; userId: number }) {
   const database = await requireDb();
-  const [overview, monitoring, forecasts, recommendations, comparisons, approvedFactors] = await Promise.all([
+  const [overview, monitoring, forecasts, recommendations, comparisons, targetAssessments, scenarios, latestDemoSimulation, approvedFactors] = await Promise.all([
     getOperationsOverview(input.organizationId),
     getMonitoringStatus(input.organizationId),
     listSustainabilityForecasts(input.organizationId),
     listSustainabilityRecommendations(input.organizationId),
     listInterventionComparisons(input.organizationId),
+    assessSustainabilityTargets(input.organizationId),
+    listSustainabilityScenarios(input.organizationId),
+    getLatestDemoSimulationSession(input.organizationId),
     listApprovedEmissionFactors(input.organizationId),
   ]);
-  const { criteria, evidence, factorDisclosure } = materializeReportSnapshot({ organizationId: input.organizationId, generatedAt: new Date(), overview, monitoring, forecasts, recommendations, comparisons, approvedFactors });
+  const { criteria, evidence, factorDisclosure } = materializeReportSnapshot({ organizationId: input.organizationId, generatedAt: new Date(), overview, monitoring, forecasts, recommendations, comparisons, targetAssessments, scenarios, latestDemoSimulation, approvedFactors });
   const [snapshot] = await database.insert(sustainabilityReportSnapshots).values({ organizationId: input.organizationId, title: input.title, criteria, evidence, factorDisclosure, generatedByUserId: input.userId }).$returningId();
   await database.insert(auditEvents).values({ organizationId: input.organizationId, actorUserId: input.userId, eventType: "report.snapshot_generated", resourceType: "sustainability_report_snapshot", resourceId: String(snapshot.id), payload: { evidenceVersion: criteria.version } });
   return { id: snapshot.id, criteria, evidence, factorDisclosure };

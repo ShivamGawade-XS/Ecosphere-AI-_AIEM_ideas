@@ -14,14 +14,30 @@ export const OAUTH_STATE_COOKIE = "__Host-oauth_state";
 // CSRF nonce. Defined here so the client encoder and server decoder never drift.
 export type OAuthState = { redirectUri: string; nonce?: string };
 
-export const encodeOAuthState = (state: OAuthState): string =>
-  btoa(JSON.stringify(state));
+function encodeBase64Url(value: string) {
+  const bytes = new TextEncoder().encode(value);
+  let binary = "";
+  for (let index = 0; index < bytes.length; index += 1) binary += String.fromCharCode(bytes[index]);
+  return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/g, "");
+}
+
+function decodeBase64Url(value: string) {
+  if (!/^[A-Za-z0-9_-]+$/.test(value)) return null;
+  try {
+    const padded = `${value.replaceAll("-", "+").replaceAll("_", "/")}${"=".repeat((4 - (value.length % 4)) % 4)}`;
+    const binary = atob(padded);
+    const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+    return new TextDecoder().decode(bytes);
+  } catch {
+    return null;
+  }
+}
+
+export const encodeOAuthState = (state: OAuthState): string => encodeBase64Url(JSON.stringify(state));
 
 export const decodeOAuthState = (state: string): OAuthState => {
-  let decoded: string;
-  try {
-    decoded = atob(state);
-  } catch {
+  const decoded = decodeBase64Url(state);
+  if (decoded === null) {
     // Malformed base64 (e.g. attacker-supplied garbage). Return no nonce so the
     // callback's CSRF guard rejects it with 403 — never throw, since the caller
     // runs outside the request handler's try/catch.

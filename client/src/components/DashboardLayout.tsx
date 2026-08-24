@@ -67,14 +67,18 @@ export default function DashboardLayout({
 
   if (!user) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="flex flex-col items-center gap-8 p-8 max-w-md w-full">
+      <div className="flex items-center justify-center min-h-screen p-6">
+        <div className="flex flex-col items-center gap-6 p-8 max-w-md w-full rounded-2xl border border-border bg-card text-card-foreground shadow-sm">
+          <EcoSphereMark />
           <div className="flex flex-col items-center gap-6">
+            <p className="text-xs font-bold tracking-[.16em] text-muted-foreground text-center">
+              AI-POWERED SUSTAINABILITY MISSION CONTROL
+            </p>
             <h1 className="text-2xl font-semibold tracking-tight text-center">
-              Sign in to continue
+              Enter your organization workspace
             </h1>
             <p className="text-sm text-muted-foreground text-center max-w-sm">
-              Access to this dashboard requires authentication. Continue to launch the login flow.
+              Sign in to access tenant-scoped sustainability evidence, controlled simulation, scenarios, alerts, and accountable actions. The public narrative remains available without a workspace session.
             </p>
           </div>
           <Button
@@ -84,6 +88,9 @@ export default function DashboardLayout({
           >
             Sign in
           </Button>
+          <a href="/narrative" className="text-sm font-medium text-primary underline underline-offset-4">
+            Explore the public product narrative
+          </a>
         </div>
       </div>
     );
