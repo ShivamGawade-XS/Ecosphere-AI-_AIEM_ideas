@@ -233,3 +233,10 @@
 - [x] Document the application threat model, data classification/retention boundaries, residual risks, and evidence-based security review cadence for the pilot release.
 - [x] Move pnpm patch and override configuration from ignored package metadata into the supported workspace configuration, then verify deterministic installation and quality checks.
 - [x] Remove the unsupported development-only Vite JSX-location plugin and its peer-version warning without changing production application behavior.
+- [x] Perform a fresh credential-independent review of authentication, authorization, input handling, worker safety, observability, dependency hygiene, performance, and accessibility; record prioritized findings and acceptance evidence.
+- [x] Constrain dynamic chart style keys, identifiers, and CSS values so the reusable chart primitive cannot generate arbitrary stylesheet content if reused with untrusted inputs.
+- [x] Bound in-process rate-limit bucket growth and rate-limit the scheduler callback route so credential-independent request floods cannot consume unbounded local memory or repeated authentication work.
+- [x] Enforce the documented twelve-hour session maximum inside the signing primitive so future server-side callers cannot accidentally mint longer-lived application sessions.
+- [x] Validate storage object-key paths centrally and prevent upstream presign response bodies from being surfaced through application errors.
+- [x] Tighten the production CSP with explicit object, worker, manifest, and script-attribute restrictions after confirming the current client origin inventory.
+- [x] Remove the restrictive mobile viewport scale cap so users can zoom content for accessibility without affecting responsive layout behavior.

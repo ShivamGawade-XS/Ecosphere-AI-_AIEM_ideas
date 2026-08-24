@@ -22,9 +22,13 @@ describe("security headers", () => {
     expect(cspCall?.[1]).toContain("default-src 'self'");
     expect(cspCall?.[1]).toContain("frame-ancestors 'none'");
     expect(cspCall?.[1]).toContain("form-action 'self'");
+    expect(cspCall?.[1]).toContain("object-src 'none'");
     expect(cspCall?.[1]).toContain("script-src 'self'");
     expect(cspCall?.[1]).not.toContain("script-src 'self' 'unsafe-inline'");
+    expect(cspCall?.[1]).toContain("script-src-attr 'none'");
     expect(cspCall?.[1]).toContain("connect-src 'self'");
+    expect(cspCall?.[1]).toContain("worker-src 'self'");
+    expect(cspCall?.[1]).toContain("manifest-src 'self'");
     expect(response.setHeader).toHaveBeenCalledWith("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
   });
 
@@ -59,5 +63,21 @@ describe("security headers", () => {
     expect(next).toHaveBeenCalledTimes(2);
     expect(response.status).toHaveBeenCalledWith(429);
     expect(response.json).toHaveBeenCalledWith({ error: "rate-limit-exceeded" });
+  });
+
+  it("uses a bounded overflow bucket rather than retaining unlimited unique client keys", () => {
+    const limit = createSimpleRateLimitMiddleware({ windowMs: 60_000, maxRequests: 2, maxBuckets: 2 });
+    const response = { setHeader: vi.fn(), status: vi.fn().mockReturnThis(), json: vi.fn() };
+    const next = vi.fn();
+
+    limit({ ip: "203.0.113.1" } as any, response, next);
+    limit({ ip: "203.0.113.2" } as any, response, next);
+    limit({ ip: "203.0.113.3" } as any, response, next);
+    limit({ ip: "203.0.113.4" } as any, response, next);
+    limit({ ip: "203.0.113.5" } as any, response, next);
+
+    expect(next).toHaveBeenCalledTimes(4);
+    expect(response.status).toHaveBeenCalledWith(429);
+    expect(response.setHeader).toHaveBeenCalledWith("RateLimit-Reset", "60");
   });
 });

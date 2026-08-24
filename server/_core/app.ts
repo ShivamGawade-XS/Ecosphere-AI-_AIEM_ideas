@@ -58,7 +58,7 @@ export function createApplication() {
       createContext,
     })
   );
-  app.all("/api/scheduled/monitoring", async (req, res) => {
+  app.all("/api/scheduled/monitoring", createSimpleRateLimitMiddleware({ windowMs: 60_000, maxRequests: 20 }), async (req, res) => {
     try {
       const vercelCron = resolveVercelCron({
         authorization: req.header("authorization"),

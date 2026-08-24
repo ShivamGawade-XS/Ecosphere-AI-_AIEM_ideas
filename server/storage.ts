@@ -17,8 +17,17 @@ function getForgeConfig() {
   return { forgeUrl: forgeUrl.replace(/\/+$/, ""), forgeKey };
 }
 
-function normalizeKey(relKey: string): string {
-  return relKey.replace(/^\/+/, "");
+export function normalizeStorageKey(relKey: string): string {
+  const key = relKey.trim().replace(/^\/+/, "");
+  const invalidSegment = key.split("/").some((segment) => !segment || segment === "." || segment === "..");
+  if (!key || key.length > 512 || key.includes("\0") || key.includes("\\") || invalidSegment) {
+    throw new Error("Invalid storage key.");
+  }
+  return key;
+}
+
+export function storageServiceError(operation: "presign" | "download", status: number) {
+  return `Storage ${operation} failed (${status}).`;
 }
 
 function appendHashSuffix(relKey: string): string {
@@ -34,7 +43,7 @@ export async function storagePut(
   contentType = "application/octet-stream",
 ): Promise<{ key: string; url: string }> {
   const { forgeUrl, forgeKey } = getForgeConfig();
-  const key = appendHashSuffix(normalizeKey(relKey));
+  const key = appendHashSuffix(normalizeStorageKey(relKey));
 
   // 1. Get presigned PUT URL from Forge
   const presignUrl = new URL("v1/storage/presign/put", forgeUrl + "/");
@@ -45,8 +54,8 @@ export async function storagePut(
   });
 
   if (!presignResp.ok) {
-    const msg = await presignResp.text().catch(() => presignResp.statusText);
-    throw new Error(`Storage presign failed (${presignResp.status}): ${msg}`);
+    console.error("[Storage] Presign request failed", { status: presignResp.status });
+    throw new Error(storageServiceError("presign", presignResp.status));
   }
 
   const { url: s3Url } = (await presignResp.json()) as { url: string };
@@ -72,13 +81,13 @@ export async function storagePut(
 }
 
 export async function storageGet(relKey: string): Promise<{ key: string; url: string }> {
-  const key = normalizeKey(relKey);
+  const key = normalizeStorageKey(relKey);
   return { key, url: `/manus-storage/${key}` };
 }
 
 export async function storageGetSignedUrl(relKey: string): Promise<string> {
   const { forgeUrl, forgeKey } = getForgeConfig();
-  const key = normalizeKey(relKey);
+  const key = normalizeStorageKey(relKey);
 
   const getUrl = new URL("v1/storage/presign/get", forgeUrl + "/");
   getUrl.searchParams.set("path", key);
@@ -88,8 +97,8 @@ export async function storageGetSignedUrl(relKey: string): Promise<string> {
   });
 
   if (!resp.ok) {
-    const msg = await resp.text().catch(() => resp.statusText);
-    throw new Error(`Storage signed URL failed (${resp.status}): ${msg}`);
+    console.error("[Storage] Download presign request failed", { status: resp.status });
+    throw new Error(storageServiceError("download", resp.status));
   }
 
   const { url } = (await resp.json()) as { url: string };

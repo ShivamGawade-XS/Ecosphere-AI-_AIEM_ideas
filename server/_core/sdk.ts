@@ -30,6 +30,13 @@ const GET_USER_INFO_PATH = `/webdev.v1.WebDevAuthPublicService/GetUserInfo`;
 const GET_USER_INFO_WITH_JWT_PATH = `/webdev.v1.WebDevAuthPublicService/GetUserInfoWithJwt`;
 export const SESSION_MAX_AGE_MS = 1000 * 60 * 60 * 12;
 
+export function normalizeSessionLifetime(expiresInMs?: number) {
+  if (!Number.isFinite(expiresInMs) || !expiresInMs || expiresInMs <= 0) {
+    return SESSION_MAX_AGE_MS;
+  }
+  return Math.min(Math.floor(expiresInMs), SESSION_MAX_AGE_MS);
+}
+
 class OAuthService {
   constructor(private client: ReturnType<typeof axios.create>) {
     console.log("[OAuth] Initialized with baseURL:", ENV.oAuthServerUrl);
@@ -188,7 +195,7 @@ class SDKServer {
     options: { expiresInMs?: number } = {}
   ): Promise<string> {
     const issuedAt = Date.now();
-    const expiresInMs = options.expiresInMs ?? SESSION_MAX_AGE_MS;
+    const expiresInMs = normalizeSessionLifetime(options.expiresInMs);
     const expirationSeconds = Math.floor((issuedAt + expiresInMs) / 1000);
     const secretKey = this.getSessionSecret();
 

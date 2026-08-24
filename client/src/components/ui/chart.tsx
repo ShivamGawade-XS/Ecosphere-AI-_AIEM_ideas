@@ -6,6 +6,23 @@ import { cn } from "@/lib/utils";
 
 // Format: { THEME_NAME: CSS_SELECTOR }
 const THEMES = { light: "", dark: ".dark" } as const;
+const UNSAFE_CSS_TOKEN = /[\u0000-\u001F\u007F;{}<>`]|\b(?:url|expression|@import|javascript)\s*\(/i;
+const SAFE_CSS_VALUE = /^[#(),.%/+\-\w\s]+$/;
+
+function toSafeCssIdentifier(value: string) {
+  const sanitized = value
+    .replace(/[^a-zA-Z0-9_-]/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return sanitized || "series";
+}
+
+function toSafeCssValue(value: string | undefined) {
+  if (!value || UNSAFE_CSS_TOKEN.test(value) || !SAFE_CSS_VALUE.test(value)) {
+    return null;
+  }
+  return value.trim();
+}
 
 export type ChartConfig = {
   [k in string]: {
@@ -46,7 +63,7 @@ function ChartContainer({
   >["children"];
 }) {
   const uniqueId = React.useId();
-  const chartId = `chart-${id || uniqueId.replace(/:/g, "")}`;
+  const chartId = `chart-${toSafeCssIdentifier(id || uniqueId.replace(/:/g, ""))}`;
 
   return (
     <ChartContext.Provider value={{ config }}>
@@ -69,33 +86,38 @@ function ChartContainer({
 }
 
 const ChartStyle = ({ id, config }: { id: string; config: ChartConfig }) => {
-  const colorConfig = Object.entries(config).filter(
-    ([, config]) => config.theme || config.color
-  );
+  const colorConfig = Object.entries(config).filter(([, config]) => config.theme || config.color);
 
   if (!colorConfig.length) {
+    return null;
+  }
+
+  const declarations = Object.entries(THEMES)
+    .map(([theme, prefix]) => {
+      const variables = colorConfig
+        .map(([key, itemConfig]) => {
+          const color = toSafeCssValue(
+            itemConfig.theme?.[theme as keyof typeof itemConfig.theme] || itemConfig.color
+          );
+          return color ? `  --color-${toSafeCssIdentifier(key)}: ${color};` : null;
+        })
+        .filter((value): value is string => Boolean(value));
+
+      return variables.length > 0
+        ? `\n${prefix} [data-chart=${toSafeCssIdentifier(id)}] {\n${variables.join("\n")}\n}\n`
+        : null;
+    })
+    .filter((value): value is string => Boolean(value))
+    .join("\n");
+
+  if (!declarations) {
     return null;
   }
 
   return (
     <style
       dangerouslySetInnerHTML={{
-        __html: Object.entries(THEMES)
-          .map(
-            ([theme, prefix]) => `
-${prefix} [data-chart=${id}] {
-${colorConfig
-  .map(([key, itemConfig]) => {
-    const color =
-      itemConfig.theme?.[theme as keyof typeof itemConfig.theme] ||
-      itemConfig.color;
-    return color ? `  --color-${key}: ${color};` : null;
-  })
-  .join("\n")}
-}
-`
-          )
-          .join("\n"),
+        __html: declarations,
       }}
     />
   );

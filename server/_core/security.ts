@@ -1,7 +1,8 @@
 import type { Request, Response } from "express";
 
-type RateLimitOptions = { windowMs: number; maxRequests: number };
+type RateLimitOptions = { windowMs: number; maxRequests: number; maxBuckets?: number };
 type RateLimitBucket = { count: number; resetAt: number };
+const OVERFLOW_BUCKET_KEY = "\u0000overflow";
 
 function firstHeaderValue(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value?.split(",")[0]?.trim();
@@ -31,26 +32,35 @@ export function sameOriginMutationMiddleware(isProduction: boolean) {
   };
 }
 
-export function createSimpleRateLimitMiddleware({ windowMs, maxRequests }: RateLimitOptions) {
+export function createSimpleRateLimitMiddleware({ windowMs, maxRequests, maxBuckets = 10_000 }: RateLimitOptions) {
   const buckets = new Map<string, RateLimitBucket>();
+  let nextPruneAt = 0;
+
+  const pruneExpiredBuckets = (now: number) => {
+    if (now < nextPruneAt && buckets.size < maxBuckets) return;
+    for (const [bucketKey, candidate] of Array.from(buckets.entries())) {
+      if (candidate.resetAt <= now) buckets.delete(bucketKey);
+    }
+    nextPruneAt = now + Math.min(windowMs, 10_000);
+  };
+
   return (
     request: Pick<Request, "ip">,
     response: Pick<Response, "setHeader" | "status" | "json">,
     next: () => void,
   ) => {
     const now = Date.now();
-    const key = request.ip || "unknown";
-    const existing = buckets.get(key);
-    const bucket = existing && existing.resetAt > now ? existing : { count: 0, resetAt: now + windowMs };
+    pruneExpiredBuckets(now);
+    const requestedKey = request.ip && request.ip.length <= 128 ? request.ip : "unknown";
+    const existing = buckets.get(requestedKey);
+    const key = existing || buckets.size < maxBuckets ? requestedKey : OVERFLOW_BUCKET_KEY;
+    const overflowExisting = buckets.get(key);
+    const bucket = overflowExisting && overflowExisting.resetAt > now ? overflowExisting : { count: 0, resetAt: now + windowMs };
     bucket.count += 1;
     buckets.set(key, bucket);
-    if (buckets.size > 10_000) {
-      for (const [bucketKey, candidate] of Array.from(buckets.entries())) {
-        if (candidate.resetAt <= now) buckets.delete(bucketKey);
-      }
-    }
     response.setHeader("RateLimit-Limit", String(maxRequests));
     response.setHeader("RateLimit-Remaining", String(Math.max(0, maxRequests - bucket.count)));
+    response.setHeader("RateLimit-Reset", String(Math.ceil((bucket.resetAt - now) / 1000)));
     if (bucket.count <= maxRequests) return next();
     response.setHeader("Retry-After", String(Math.ceil((bucket.resetAt - now) / 1000)));
     response.status(429).json({ error: "rate-limit-exceeded" });
@@ -72,7 +82,7 @@ export function applySecurityHeaders(response: Pick<Response, "setHeader">, isPr
   if (isProduction) {
     response.setHeader(
       "Content-Security-Policy",
-      "default-src 'self'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; script-src 'self'; connect-src 'self'"
+      "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; script-src 'self'; script-src-attr 'none'; connect-src 'self'; worker-src 'self'; manifest-src 'self'"
     );
     response.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
   }
