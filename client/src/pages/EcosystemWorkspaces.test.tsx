@@ -237,6 +237,12 @@ describe("authenticated ecosystem workspaces", () => {
     expect(screen.queryByText("AIEM Owner")).toBeNull();
   });
 
+  it("discloses deterministic forecast-model comparison without claiming predictive accuracy", () => {
+    render(<IntelligenceWorkspace />);
+    expect(screen.getByText(/compares versioned moving-average and last-value candidates/i)).toBeTruthy();
+    expect(screen.getByText(/does not claim predictive accuracy/i)).toBeTruthy();
+  });
+
   it("makes protected query failures explicit rather than fabricating operational state", () => {
     testApi.intelligenceReadiness.mockReturnValue({ ...query(undefined), error: new Error("network") });
     render(<IntelligenceWorkspace />);

@@ -260,3 +260,4 @@
 - [x] Verify unauthenticated redirect-path behavior cannot strand users in a protected redirect loop.
 - [x] Bound local MySQL/TiDB connection-pool queueing so a busy process cannot retain unlimited pending database work.
 - [x] Add a tenant-scoped evidence timeline that links persisted monitoring events, recommendations, and accountable actions without fabricating missing lineage.
+- [x] Add transparent deterministic forecast-model comparison and backtest-based selection without claiming predictive accuracy.

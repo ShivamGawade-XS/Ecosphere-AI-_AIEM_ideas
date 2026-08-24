@@ -1,0 +1,1 @@
+ALTER TABLE `sustainability_forecasts` MODIFY COLUMN `method` enum('moving_average_v1','last_value_v1') NOT NULL;
