@@ -2,6 +2,7 @@ import fs from "fs";
 import path from "path";
 import { describe, expect, it } from "vitest";
 import { createApplication } from "./app";
+import { resolveStaticDistPath } from "./static";
 
 describe("Vercel deployment contract", () => {
   it("constructs the HTTP app without binding a local listener", () => {
@@ -38,5 +39,25 @@ describe("Vercel deployment contract", () => {
     expect(bootstrap).toContain("export default app;");
     expect(bootstrap).toContain("serveStatic(app);");
     expect(bootstrap).not.toContain("./vite");
+  });
+
+  it("keeps the clean Node production-start artifact aligned with the build output", () => {
+    const packagePath = path.resolve(import.meta.dirname, "../..", "package.json");
+    const pkg = JSON.parse(fs.readFileSync(packagePath, "utf8")) as { scripts: Record<string, string> };
+    const startPath = path.resolve(import.meta.dirname, "startProduction.ts");
+    const start = fs.readFileSync(startPath, "utf8");
+
+    expect(pkg.scripts.build).toContain("dist/server/start.js");
+    expect(pkg.scripts.start).toContain("dist/server/start.js");
+    expect(start).toContain('import app from "./serverApp"');
+  });
+
+  it("resolves the compiled Node server's adjacent public artifact", () => {
+    expect(resolveStaticDistPath({
+      isVercel: false,
+      isDevelopment: false,
+      moduleDir: "/workspace/dist/server",
+      cwd: "/workspace",
+    })).toBe(path.resolve("/workspace/dist/public"));
   });
 });

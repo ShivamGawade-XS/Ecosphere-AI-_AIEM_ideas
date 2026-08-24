@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { TRPCError } from "@trpc/server";
+import { COOKIE_NAME } from "../shared/const";
 import type { TrpcContext } from "./_core/context";
 
 const database = vi.hoisted(() => ({
@@ -56,12 +57,21 @@ const database = vi.hoisted(() => ({
   createInterventionComparison: vi.fn(),
   listSustainabilityReportSnapshots: vi.fn(),
   createSustainabilityReportSnapshot: vi.fn(),
+  listIotDevices: vi.fn(),
+  createIotDevice: vi.fn(),
+  hashIotDeviceCredential: vi.fn(),
+  updateIotDeviceStatus: vi.fn(),
+  rotateIotDeviceCredential: vi.fn(),
+  incrementUserSessionVersion: vi.fn(),
 }));
 
 vi.mock("./db", () => database);
 
 const worker = vi.hoisted(() => ({ runMonitoringForOrganization: vi.fn() }));
 vi.mock("./workers/monitoringWorker", () => worker);
+
+const storage = vi.hoisted(() => ({ storagePut: vi.fn() }));
+vi.mock("./storage", () => storage);
 
 import { appRouter } from "./routers";
 
@@ -140,7 +150,14 @@ describe("EcoSphere core API", () => {
     database.listInterventionComparisons.mockResolvedValue([]);
     database.listSustainabilityReportSnapshots.mockResolvedValue([]);
     database.createSustainabilityReportSnapshot.mockResolvedValue({ id: 101, criteria: {}, evidence: {}, factorDisclosure: "Pilot fallback disclosed." });
+    database.listIotDevices.mockResolvedValue([]);
+    database.hashIotDeviceCredential.mockReturnValue("credential-hash");
+    database.createIotDevice.mockResolvedValue({ id: 201 });
+    database.updateIotDeviceStatus.mockResolvedValue({ id: 201, status: "suspended" });
+    database.rotateIotDeviceCredential.mockResolvedValue({ id: 201, credentialVersion: 2 });
+    database.incrementUserSessionVersion.mockResolvedValue({ id: 17, sessionVersion: 2 });
     worker.runMonitoringForOrganization.mockResolvedValue({ organizationId: 8, runKey: "manual:test-run", status: "completed", readingsScanned: 1, qualityFindingsCreated: 4, anomaliesCreated: 0, alertsCreated: 0, ecoScoresUpdated: 1, latestEcoScore: 100 });
+    storage.storagePut.mockResolvedValue({ key: "organizations/8/actions/71/evidence_123.pdf", url: "/manus-storage/organizations/8/actions/71/evidence_123.pdf" });
   });
 
   it("persists an authenticated reading with a server-owned user identifier", async () => {
@@ -202,6 +219,17 @@ describe("EcoSphere core API", () => {
 
     expect(result.summary).toMatchObject({ total: expect.any(Number), organizationCount: 1 });
     expect(result.items.some((item) => item.id === "ingestion" && item.status === "complete")).toBe(true);
+  });
+
+  it("invalidates all authenticated sessions by incrementing the persisted session version", async () => {
+    const ctx = createAuthenticatedContext();
+    const clearCookie = vi.fn();
+    ctx.res = { clearCookie } as TrpcContext["res"];
+    const caller = appRouter.createCaller(ctx);
+
+    await expect(caller.auth.revokeAllSessions()).resolves.toEqual({ success: true, sessionVersion: 2 });
+    expect(database.incrementUserSessionVersion).toHaveBeenCalledWith(17);
+    expect(clearCookie).toHaveBeenCalledWith(COOKIE_NAME, expect.objectContaining({ maxAge: -1, sameSite: "lax" }));
   });
 
   it("creates an accountable action with the authenticated actor and a tenant-owned site", async () => {
@@ -331,6 +359,34 @@ describe("EcoSphere core API", () => {
     database.getActionCollaboration.mockResolvedValueOnce({ action: { id: 71 }, comments: [], evidence: [{ id: 14, type: "attachment", reference: "/manus-storage/evidence.pdf" }] });
     await expect(caller.actions.updateStatus({ organizationId: 8, actionId: 71, status: "completed" })).resolves.toMatchObject({ id: 71, status: "completed" });
     expect(database.updateSustainabilityActionStatus).toHaveBeenCalledWith({ organizationId: 8, actionId: 71, status: "completed", userId: 17 });
+  });
+
+  it("allows only approved attachment media types before managed storage is invoked", async () => {
+    const caller = appRouter.createCaller(createAuthenticatedContext());
+    const base64 = Buffer.from("inspection evidence").toString("base64");
+
+    await expect(caller.actions.uploadAttachment({ organizationId: 8, actionId: 71, label: "Inspection record", fileName: "inspection.html", contentType: "text/html", contentBase64: base64 })).rejects.toMatchObject<Partial<TRPCError>>({ code: "BAD_REQUEST" });
+    expect(storage.storagePut).not.toHaveBeenCalled();
+
+    await expect(caller.actions.uploadAttachment({ organizationId: 8, actionId: 71, label: "Inspection record", fileName: "inspection.pdf", contentType: "application/pdf", contentBase64: base64 })).resolves.toMatchObject({ url: "/manus-storage/organizations/8/actions/71/evidence_123.pdf" });
+    expect(storage.storagePut).toHaveBeenCalledWith("organizations/8/actions/71/inspection.pdf", expect.any(Buffer), "application/pdf");
+  });
+
+  it("requires ownership to create or change an IoT device and issues its credential only at registration", async () => {
+    const caller = appRouter.createCaller(createAuthenticatedContext());
+    await expect(caller.iot.registerDevice({ organizationId: 8, siteId: 13, meterId: 44, deviceKey: "aiem-hvac-gateway-01", displayName: "AIEM HVAC gateway" })).rejects.toMatchObject<Partial<TRPCError>>({ code: "FORBIDDEN" });
+
+    database.getOrganizationMembership.mockResolvedValue({ organizationId: 8, userId: 17, role: "owner" });
+    const registered = await caller.iot.registerDevice({ organizationId: 8, siteId: 13, meterId: 44, deviceKey: "aiem-hvac-gateway-01", displayName: "AIEM HVAC gateway" });
+    expect(registered).toMatchObject({ device: { id: 201 }, credential: expect.stringMatching(/^[A-Za-z0-9_-]{40,}$/), credentialVersion: 1 });
+    expect(database.createIotDevice).toHaveBeenCalledWith(expect.objectContaining({ organizationId: 8, siteId: 13, meterId: 44, credentialHash: "credential-hash", userId: 17 }));
+
+    await expect(caller.iot.updateDeviceStatus({ organizationId: 8, deviceId: 201, status: "suspended" })).resolves.toMatchObject({ id: 201, status: "suspended" });
+    expect(database.updateIotDeviceStatus).toHaveBeenCalledWith({ organizationId: 8, deviceId: 201, status: "suspended", userId: 17 });
+
+    const rotated = await caller.iot.rotateDeviceCredential({ organizationId: 8, deviceId: 201 });
+    expect(rotated).toMatchObject({ device: { id: 201, credentialVersion: 2 }, credential: expect.stringMatching(/^[A-Za-z0-9_-]{40,}$/) });
+    expect(database.rotateIotDeviceCredential).toHaveBeenCalledWith(expect.objectContaining({ organizationId: 8, deviceId: 201, credentialHash: "credential-hash", userId: 17 }));
   });
 
   it("denies action collaboration, comparison, and report-snapshot records outside the caller tenant", async () => {

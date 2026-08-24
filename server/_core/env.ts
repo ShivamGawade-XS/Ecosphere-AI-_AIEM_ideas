@@ -8,3 +8,15 @@ export const ENV = {
   forgeApiUrl: process.env.BUILT_IN_FORGE_API_URL ?? "",
   forgeApiKey: process.env.BUILT_IN_FORGE_API_KEY ?? "",
 };
+
+// The managed runtime provides a 22-character URL-safe secret (~132 bits).
+// Require at least 16 characters while relying on a cryptographically random secret source.
+export const MIN_SESSION_SECRET_LENGTH = 16;
+
+export function hasStrongSessionSecret(secret: string) {
+  return secret.trim().length >= MIN_SESSION_SECRET_LENGTH;
+}
+
+export function hasAuthenticationConfiguration(input: Pick<typeof ENV, "appId" | "cookieSecret" | "oAuthServerUrl">) {
+  return Boolean(input.appId.trim()) && Boolean(input.oAuthServerUrl.trim()) && hasStrongSessionSecret(input.cookieSecret);
+}

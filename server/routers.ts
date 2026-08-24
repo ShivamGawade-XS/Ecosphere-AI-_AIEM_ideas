@@ -1,5 +1,6 @@
 import { TRPCError } from "@trpc/server";
 import { createHash } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import { parse as parseCookie } from "cookie";
 import { z } from "zod";
 import { actionPriorities, actionStatuses, anomalySeverities, organizationRoles, readingSources, resourceTypes } from "../drizzle/schema";
@@ -19,6 +20,16 @@ const mutableRoles = ["owner", "manager", "operator"] as const;
 const governanceRoles = ["owner", "manager"] as const;
 const schedulerCadenceMinutes = [15, 30, 60, 360, 1440] as const;
 const schedulerCronByCadence: Record<(typeof schedulerCadenceMinutes)[number], string> = { 15: "0 */15 * * * *", 30: "0 */30 * * * *", 60: "0 0 * * * *", 360: "0 0 */6 * * *", 1440: "0 0 2 * * *" };
+const permittedAttachmentContentTypes = new Set([
+  "application/pdf",
+  "text/plain",
+  "text/csv",
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+]);
 
 function requireAuthenticatedSchedulerSession(cookieHeader: string | undefined) {
   const session = parseCookie(cookieHeader ?? "")[COOKIE_NAME];
@@ -67,6 +78,12 @@ export const appRouter = router({
       const cookieOptions = getSessionCookieOptions(ctx.req);
       ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
       return { success: true } as const;
+    }),
+    revokeAllSessions: protectedProcedure.mutation(async ({ ctx }) => {
+      const user = await db.incrementUserSessionVersion(ctx.user.id);
+      if (!user) throw new TRPCError({ code: "NOT_FOUND", message: "Authenticated user was not found." });
+      ctx.res.clearCookie(COOKIE_NAME, { ...getSessionCookieOptions(ctx.req), maxAge: -1 });
+      return { success: true, sessionVersion: user.sessionVersion };
     }),
   }),
 
@@ -613,6 +630,9 @@ export const appRouter = router({
       }))
       .mutation(async ({ ctx, input }) => {
         await requireOrganizationRole(ctx.user.id, input.organizationId, mutableRoles);
+        if (!permittedAttachmentContentTypes.has(input.contentType.toLowerCase())) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Attachment type is not permitted." });
+        }
         const bytes = Buffer.from(input.contentBase64, "base64");
         if (!bytes.length || bytes.length > 2_000_000) throw new TRPCError({ code: "BAD_REQUEST", message: "Attachment must contain 1–2,000,000 bytes." });
         const safeFileName = input.fileName.replace(/[^a-zA-Z0-9._-]/g, "_");
@@ -629,6 +649,61 @@ export const appRouter = router({
       .query(async ({ ctx, input }) => {
         await requireOrganizationRole(ctx.user.id, input.organizationId, governanceRoles);
         return db.listOrganizationAuditEvents(input.organizationId, input.limit);
+      }),
+  }),
+
+  iot: router({
+    listDevices: protectedProcedure
+      .input(z.object({ organizationId: z.number().int().positive() }))
+      .query(async ({ ctx, input }) => {
+        await requireOrganizationRole(ctx.user.id, input.organizationId, governanceRoles);
+        return db.listIotDevices(input.organizationId);
+      }),
+    registerDevice: protectedProcedure
+      .input(z.object({
+        organizationId: z.number().int().positive(),
+        siteId: z.number().int().positive(),
+        meterId: z.number().int().positive(),
+        deviceKey: z.string().trim().regex(/^[A-Za-z0-9_.:-]{3,96}$/),
+        displayName: z.string().trim().min(3).max(160),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        await requireOrganizationRole(ctx.user.id, input.organizationId, ["owner"]);
+        const meter = await db.getMeterById(input.organizationId, input.meterId);
+        if (!meter || meter.siteId !== input.siteId) throw new TRPCError({ code: "NOT_FOUND", message: "Active meter was not found at this site." });
+        const credential = randomBytes(32).toString("base64url");
+        const device = await db.createIotDevice({
+          ...input,
+          credentialHash: db.hashIotDeviceCredential(credential),
+          userId: ctx.user.id,
+        });
+        // The raw device secret is intentionally returned only at creation time.
+        return { device, credential, credentialVersion: 1 };
+      }),
+    updateDeviceStatus: protectedProcedure
+      .input(z.object({
+        organizationId: z.number().int().positive(),
+        deviceId: z.number().int().positive(),
+        status: z.enum(["active", "suspended", "revoked", "decommissioned"]),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        await requireOrganizationRole(ctx.user.id, input.organizationId, ["owner"]);
+        const device = await db.updateIotDeviceStatus({ ...input, userId: ctx.user.id });
+        if (!device) throw new TRPCError({ code: "NOT_FOUND", message: "IoT device not found in this organization." });
+        return device;
+      }),
+    rotateDeviceCredential: protectedProcedure
+      .input(z.object({ organizationId: z.number().int().positive(), deviceId: z.number().int().positive() }))
+      .mutation(async ({ ctx, input }) => {
+        await requireOrganizationRole(ctx.user.id, input.organizationId, ["owner"]);
+        const credential = randomBytes(32).toString("base64url");
+        const device = await db.rotateIotDeviceCredential({
+          ...input,
+          credentialHash: db.hashIotDeviceCredential(credential),
+          userId: ctx.user.id,
+        });
+        if (!device) throw new TRPCError({ code: "NOT_FOUND", message: "Active IoT device not found in this organization." });
+        return { device, credential };
       }),
   }),
 

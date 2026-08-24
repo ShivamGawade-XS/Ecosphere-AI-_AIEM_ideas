@@ -11,6 +11,9 @@ import { securityHeadersMiddleware } from "./security";
 import { sdk } from "./sdk";
 import { registerStorageProxy } from "./storageProxy";
 import { resolveVercelCron } from "./vercelCron";
+import { ENV, hasAuthenticationConfiguration } from "./env";
+import { createSimpleRateLimitMiddleware, sameOriginMutationMiddleware } from "./security";
+import { acceptIotTelemetry, IotTelemetryError } from "../iot/telemetry";
 
 /**
  * Builds the complete HTTP application without binding a port. This lets the
@@ -19,20 +22,37 @@ import { resolveVercelCron } from "./vercelCron";
 export function createApplication() {
   const app = express();
   app.disable("x-powered-by");
+  app.set("trust proxy", 1);
   app.use(securityHeadersMiddleware(process.env.NODE_ENV === "production"));
-  app.use(express.json({ limit: "50mb" }));
-  app.use(express.urlencoded({ limit: "50mb", extended: true }));
+  app.use(express.json({ limit: "3mb" }));
   app.use(operationalRequestTelemetry());
+  app.use(sameOriginMutationMiddleware(process.env.NODE_ENV === "production"));
   app.get("/healthz", (_req, res) => res.status(200).json(createLivenessPayload()));
   app.get("/readyz", async (_req, res) => {
     const database = await getDb();
-    const readiness = createReadinessResponse(Boolean(database));
+    const readiness = createReadinessResponse(Boolean(database), new Date(), hasAuthenticationConfiguration(ENV));
     return res.status(readiness.status).json(readiness.body);
+  });
+  app.post("/api/iot/telemetry", createSimpleRateLimitMiddleware({ windowMs: 60_000, maxRequests: 120 }), async (req, res) => {
+    try {
+      const result = await acceptIotTelemetry({
+        organizationId: Number(req.headers["x-ecosphere-organization-id"]),
+        deviceKey: typeof req.headers["x-ecosphere-device-key"] === "string" ? req.headers["x-ecosphere-device-key"] : "",
+        credential: typeof req.headers["x-ecosphere-device-secret"] === "string" ? req.headers["x-ecosphere-device-secret"] : "",
+        payload: req.body,
+      });
+      return res.status(result.status === "accepted" ? 202 : 200).json(result);
+    } catch (error) {
+      if (error instanceof IotTelemetryError) return res.status(error.statusCode).json({ error: error.message });
+      console.error("[IoT] Telemetry ingestion failed", error instanceof Error ? error.message : "unknown error");
+      return res.status(500).json({ error: "Telemetry ingestion failed." });
+    }
   });
   registerStorageProxy(app);
   registerOAuthRoutes(app);
   app.use(
     "/api/trpc",
+    createSimpleRateLimitMiddleware({ windowMs: 60_000, maxRequests: 240 }),
     createExpressMiddleware({
       router: appRouter,
       createContext,

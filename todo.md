@@ -208,3 +208,25 @@
 - [x] Create a step-by-step Vercel operator runbook covering environment configuration, OAuth callback registration, redeployment, health/readiness interpretation, verification, and the explicitly gated scheduler trial.
 - [x] Verify the latest GitHub CI and Vercel deployment state after the documentation synchronization, then record any credential-independent findings.
 - [x] Pin the Vercel runtime to the locally and CI-validated Node.js 22 major release, then verify the deployment contract.
+
+## Enterprise Audit and IoT Expansion
+
+- [x] Perform an adversarial repository, deployment, security, reliability, accessibility, and operational-readiness audit with a transparent scorecard.
+- [ ] Remediate all practical high- and medium-severity application-level security and reliability findings, with regression tests and verification evidence.
+- [x] Produce a secure IoT integration design covering device identity, gateway or webhook ingestion, validation, tenant mapping, replay protection, observability, and an AIEM Campus pilot path.
+- [x] Re-score the platform after remediation, clearly separating verified improvements from external/operator-dependent gaps.
+- [x] Replace the public key-based managed-storage proxy with an authenticated tenant-scoped access boundary while retaining only explicit public brand assets.
+- [x] Repair and regression-test the clean local production-start contract.
+- [x] Fail closed on missing or weak production session configuration, bind session claims to the active application, and surface authentication readiness safely.
+- [x] Reduce global request parsing exposure and add explicit request-origin and rate-limit protections for unsafe application traffic.
+- [x] Add additive IoT device and telemetry-replay persistence records with tenant, site, meter, credential-version, lifecycle, and audit boundaries.
+- [x] Implement a signed device-key telemetry ingress that validates device state, tenant meter mapping, payload size, timestamp skew, unit, sequence/idempotency, and controlled rate before persisting readings.
+- [x] Add protected IoT device registration and lifecycle controls plus deterministic API and domain regression tests.
+- [x] Tighten production CSP script and form directives without disrupting the current application shell, and add regression coverage.
+- [x] Add dependency-update automation configuration and repository security reporting guidance without changing external branch-protection policy automatically.
+- [x] Add a server-side session-version revocation control for authenticated users, with safe legacy migration behavior and regression tests.
+- [x] Align the session-secret strength threshold with the secure built-in runtime secret format while retaining a fail-closed readiness check.
+- [x] Require an explicit organization identifier in IoT telemetry requests so a device key is always resolved inside one tenant namespace.
+- [x] Add owner-governed IoT device-secret rotation with credential-version audit evidence and one-time secret return semantics.
+- [x] Add an authenticated, owner-governed IoT device-management panel that exposes device inventory, registration, lifecycle, and one-time credential rotation feedback without revealing persisted secrets.
+- [x] Remove the unaudited external analytics script and restrict production CSP script/connect sources to first-party application endpoints, with regression validation.

@@ -4,7 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const testApi = vi.hoisted(() => ({
-  organizationsMine: vi.fn(), organizationMembers: vi.fn(), overview: vi.fn(), recentReadings: vi.fn(), actionList: vi.fn(), actionCollaboration: vi.fn(), siteList: vi.fn(), meterList: vi.fn(),
+  organizationsMine: vi.fn(), organizationMembers: vi.fn(), overview: vi.fn(), recentReadings: vi.fn(), actionList: vi.fn(), actionCollaboration: vi.fn(), siteList: vi.fn(), meterList: vi.fn(), iotDevices: vi.fn(),
   intelligenceReadiness: vi.fn(), monitoringOverview: vi.fn(), monitoringStatus: vi.fn(), monitoringHealth: vi.fn(), administrationStatus: vi.fn(), schedulerTrialStatus: vi.fn(), alertRouting: vi.fn(), deliveryAttempts: vi.fn(), escalationPolicy: vi.fn(), escalations: vi.fn(), forecastList: vi.fn(), recommendationList: vi.fn(), comparisonList: vi.fn(), reportsSummary: vi.fn(), reportSnapshots: vi.fn(), scenarioList: vi.fn(), invalidate: vi.fn().mockResolvedValue(undefined),
   actionCreateMode: "success" as "success" | "error", scenarioPreviewMode: "success" as "success" | "error", scenarioSaveMode: "success" as "success" | "error",
   scenarioPreviewData: undefined as unknown,
@@ -13,7 +13,7 @@ const testApi = vi.hoisted(() => ({
 vi.mock("@/lib/trpc", () => ({
   trpc: {
     useUtils: () => ({
-      organizations: { mine: { invalidate: testApi.invalidate }, members: { invalidate: testApi.invalidate } }, sites: { list: { invalidate: testApi.invalidate } }, meters: { list: { invalidate: testApi.invalidate } },
+      organizations: { mine: { invalidate: testApi.invalidate }, members: { invalidate: testApi.invalidate } }, sites: { list: { invalidate: testApi.invalidate } }, meters: { list: { invalidate: testApi.invalidate } }, iot: { listDevices: { invalidate: testApi.invalidate } },
       actions: { list: { invalidate: testApi.invalidate }, collaboration: { invalidate: testApi.invalidate } }, scenarios: { list: { invalidate: testApi.invalidate } }, comparisons: { list: { invalidate: testApi.invalidate } }, forecasts: { list: { invalidate: testApi.invalidate } }, recommendations: { list: { invalidate: testApi.invalidate } }, reports: { snapshots: { invalidate: testApi.invalidate } }, analytics: { overview: { invalidate: testApi.invalidate } }, monitoring: { status: { invalidate: testApi.invalidate }, health: { invalidate: testApi.invalidate } }, schedulerTrial: { status: { invalidate: testApi.invalidate } }, administration: { applicationStatus: { invalidate: testApi.invalidate } }, alertRouting: { get: { invalidate: testApi.invalidate }, deliveries: { invalidate: testApi.invalidate } }, alertEscalation: { get: { invalidate: testApi.invalidate }, list: { invalidate: testApi.invalidate } }, intelligence: { readiness: { invalidate: testApi.invalidate } },
     }),
     organizations: { mine: { useQuery: () => testApi.organizationsMine() }, members: { useQuery: () => testApi.organizationMembers() }, create: { useMutation: () => ({ isPending: false, mutate: vi.fn() }) }, updateMemberRole: { useMutation: () => ({ isPending: false, mutate: vi.fn() }) } },
@@ -21,6 +21,7 @@ vi.mock("@/lib/trpc", () => ({
     readings: { recent: { useQuery: () => testApi.recentReadings() } },
     sites: { list: { useQuery: () => testApi.siteList() }, create: { useMutation: () => ({ isPending: false, mutate: vi.fn() }) } },
     meters: { list: { useQuery: () => testApi.meterList() }, create: { useMutation: () => ({ isPending: false, mutate: vi.fn() }) } },
+    iot: { listDevices: { useQuery: () => testApi.iotDevices() }, registerDevice: { useMutation: () => ({ isPending: false, mutate: vi.fn() }) }, rotateDeviceCredential: { useMutation: () => ({ isPending: false, mutate: vi.fn() }) }, updateDeviceStatus: { useMutation: () => ({ isPending: false, mutate: vi.fn() }) } },
     intelligence: { readiness: { useQuery: () => testApi.intelligenceReadiness() } },
     monitoring: { status: { useQuery: () => testApi.monitoringStatus() }, health: { useQuery: () => testApi.monitoringHealth() }, runOnce: { useMutation: () => ({ isPending: false, mutate: vi.fn(), data: undefined, error: null }) }, configureTarget: { useMutation: () => ({ isPending: false, mutate: vi.fn(), error: null }) }, retryRecovery: { useMutation: () => ({ isPending: false, mutate: vi.fn(), error: null }) } },
     schedulerTrial: { status: { useQuery: () => testApi.schedulerTrialStatus() }, saveDraft: { useMutation: () => ({ isPending: false, mutate: vi.fn() }) }, activate: { useMutation: () => ({ isPending: false, mutate: vi.fn() }) }, pause: { useMutation: () => ({ isPending: false, mutate: vi.fn() }) } },
@@ -57,8 +58,9 @@ describe("authenticated ecosystem workspaces", () => {
     testApi.recentReadings.mockReturnValue(query([]));
     testApi.actionList.mockReturnValue(query([]));
     testApi.actionCollaboration.mockReturnValue(query({ action: { id: 1, title: "Inspect HVAC" }, comments: [], evidence: [] }));
-    testApi.siteList.mockReturnValue(query([]));
-    testApi.meterList.mockReturnValue(query([]));
+    testApi.siteList.mockReturnValue(query([{ id: 13, name: "AIEM Main Campus", code: "AIEM-MAIN", timezone: "Asia/Kolkata" }]));
+    testApi.meterList.mockReturnValue(query([{ id: 44, siteId: 13, displayName: "HVAC Electricity", canonicalUnit: "kWh", resourceType: "energy" }]));
+    testApi.iotDevices.mockReturnValue(query([{ id: 201, meterId: 44, deviceKey: "aiem-hvac-gateway-01", displayName: "AIEM HVAC gateway", status: "active", credentialVersion: 1, lastSeenAt: null }]));
     testApi.intelligenceReadiness.mockReturnValue(query({ overview: { meterCount: 2, readingCount: 3 }, pipeline: [{ id: "registry", label: "Meter registry", state: "ready", evidence: "2 registered meters" }, { id: "analytics", label: "Anomaly and forecast worker", state: "planned", evidence: "Requires durable scheduling." }] }));
     testApi.monitoringStatus.mockReturnValue(query({ latestRun: null, latestScore: null, openAlertCount: 0 }));
     testApi.monitoringOverview.mockReturnValue(query({ status: { latestRun: null, latestScore: null, openAlertCount: 0 }, alerts: [], anomalies: [], qualityFindings: [], qualityWarnings: 0, qualityFailures: 0, carbonTotals: { totalKgCo2e: 0, calculationCount: 0, factorLabel: "pilot" } }));
@@ -159,6 +161,21 @@ describe("authenticated ecosystem workspaces", () => {
     expect(screen.getAllByText("Owner").length).toBeGreaterThan(0);
     expect(screen.getByRole("button", { name: "Learn about owner safety" })).toBeTruthy();
     expect(screen.getByText(/Invitation delivery is not configured in this deployment\./)).toBeTruthy();
+  });
+
+  it("shows IoT device controls only to tenant owners and never displays a persisted device secret", () => {
+    const { unmount } = render(<RegistryWorkspace />);
+    expect(screen.getByRole("region", { name: "IoT gateway device management" })).toBeTruthy();
+    expect(screen.getByLabelText("IoT device key")).toBeTruthy();
+    expect(screen.getByText("AIEM HVAC gateway")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Rotate secret" })).toBeTruthy();
+    expect(screen.queryByText("one-time-device-secret")).toBeNull();
+    unmount();
+
+    testApi.organizationsMine.mockReturnValue(query([{ organization: { id: 1, name: "AIEM Campus Pilot" }, membership: { role: "operator" } }]));
+    render(<RegistryWorkspace />);
+    expect(screen.getByText("Only tenant owners can create, rotate, or change telemetry device controls.")).toBeTruthy();
+    expect(screen.queryByLabelText("IoT device key")).toBeNull();
   });
 
   it("keeps the member list empty when its protected API denies visibility", () => {

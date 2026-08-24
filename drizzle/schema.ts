@@ -15,6 +15,7 @@ import {
 export const organizationRoles = ["owner", "manager", "operator", "viewer"] as const;
 export const resourceTypes = ["energy", "water", "waste", "fuel", "renewable"] as const;
 export const readingSources = ["manual", "csv", "api", "connector", "simulated"] as const;
+export const iotDeviceStatuses = ["active", "suspended", "revoked", "decommissioned"] as const;
 export const ingestionStatuses = ["processing", "completed", "completed_with_errors", "failed"] as const;
 export const qualityStatuses = ["accepted", "flagged", "rejected"] as const;
 export const actionStatuses = ["proposed", "in_progress", "completed", "archived"] as const;
@@ -72,6 +73,7 @@ export const users = mysqlTable("users", {
   email: varchar("email", { length: 320 }),
   loginMethod: varchar("loginMethod", { length: 64 }),
   role: mysqlEnum("role", ["user", "admin"]).default("user").notNull(),
+  sessionVersion: int("sessionVersion").notNull().default(1),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
   lastSignedIn: timestamp("lastSignedIn").defaultNow().notNull(),
@@ -140,6 +142,50 @@ export const meters = mysqlTable(
   (table) => [
     uniqueIndex("meters_org_key_unique").on(table.organizationId, table.meterKey),
     index("meters_site_idx").on(table.siteId),
+  ],
+);
+
+/** Registered gateway/device identity for a tenant-scoped telemetry source. */
+export const iotDevices = mysqlTable(
+  "iot_devices",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    organizationId: int("organizationId").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    siteId: int("siteId").notNull().references(() => sites.id, { onDelete: "cascade" }),
+    meterId: int("meterId").notNull().references(() => meters.id, { onDelete: "cascade" }),
+    deviceKey: varchar("deviceKey", { length: 96 }).notNull(),
+    displayName: varchar("displayName", { length: 160 }).notNull(),
+    credentialHash: varchar("credentialHash", { length: 128 }).notNull(),
+    credentialVersion: int("credentialVersion").notNull().default(1),
+    status: mysqlEnum("status", iotDeviceStatuses).notNull().default("active"),
+    lastSeenAt: timestamp("lastSeenAt"),
+    createdByUserId: int("createdByUserId").notNull().references(() => users.id),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("iot_devices_org_key_unique").on(table.organizationId, table.deviceKey),
+    index("iot_devices_meter_idx").on(table.meterId),
+    index("iot_devices_org_status_idx").on(table.organizationId, table.status),
+  ],
+);
+
+/** Immutable replay-detection evidence for accepted device telemetry messages. */
+export const iotTelemetryReceipts = mysqlTable(
+  "iot_telemetry_receipts",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    organizationId: int("organizationId").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    deviceId: int("deviceId").notNull().references(() => iotDevices.id, { onDelete: "cascade" }),
+    readingId: int("readingId").notNull().references(() => sustainabilityReadings.id, { onDelete: "cascade" }),
+    messageId: varchar("messageId", { length: 128 }).notNull(),
+    observedAt: timestamp("observedAt").notNull(),
+    payloadHash: varchar("payloadHash", { length: 128 }).notNull(),
+    receivedAt: timestamp("receivedAt").defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("iot_receipts_device_message_unique").on(table.deviceId, table.messageId),
+    index("iot_receipts_org_received_idx").on(table.organizationId, table.receivedAt),
   ],
 );
 

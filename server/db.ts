@@ -1,6 +1,7 @@
-import { and, count, desc, eq, isNull, sum } from "drizzle-orm";
+import { and, count, desc, eq, isNull, sql, sum } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import { nanoid } from "nanoid";
+import { createHash, timingSafeEqual } from "node:crypto";
 import {
   auditEvents,
   alertDeliveryAttempts,
@@ -15,6 +16,8 @@ import {
   ecoScoreSnapshots,
   emissionFactors,
   ingestionBatches,
+  iotDevices,
+  iotTelemetryReceipts,
   meters,
   monitoringAlerts,
   monitoringRecoveryEvents,
@@ -104,6 +107,13 @@ export async function getUserByOpenId(openId: string) {
   const database = await getDb();
   if (!database) return undefined;
   const result = await database.select().from(users).where(eq(users.openId, openId)).limit(1);
+  return result[0];
+}
+
+export async function incrementUserSessionVersion(userId: number) {
+  const database = await requireDb();
+  await database.update(users).set({ sessionVersion: sql`${users.sessionVersion} + 1` }).where(eq(users.id, userId));
+  const result = await database.select().from(users).where(eq(users.id, userId)).limit(1);
   return result[0];
 }
 
@@ -276,6 +286,149 @@ export async function getMeterById(organizationId: number, meterId: number) {
     .where(and(eq(meters.organizationId, organizationId), eq(meters.id, meterId), eq(meters.isActive, true)))
     .limit(1);
   return result[0];
+}
+
+export function hashIotDeviceCredential(credential: string) {
+  return createHash("sha256").update(credential).digest("hex");
+}
+
+export function iotDeviceCredentialMatches(credential: string, expectedHash: string) {
+  const actual = Buffer.from(hashIotDeviceCredential(credential), "hex");
+  const expected = Buffer.from(expectedHash, "hex");
+  return actual.length === expected.length && timingSafeEqual(actual, expected);
+}
+
+export async function createIotDevice(input: {
+  organizationId: number;
+  siteId: number;
+  meterId: number;
+  deviceKey: string;
+  displayName: string;
+  credentialHash: string;
+  userId: number;
+}) {
+  const database = await requireDb();
+  return database.transaction(async (tx) => {
+    const [created] = await tx.insert(iotDevices).values({
+      organizationId: input.organizationId,
+      siteId: input.siteId,
+      meterId: input.meterId,
+      deviceKey: input.deviceKey,
+      displayName: input.displayName,
+      credentialHash: input.credentialHash,
+      createdByUserId: input.userId,
+    }).$returningId();
+    await tx.insert(auditEvents).values({
+      organizationId: input.organizationId,
+      actorUserId: input.userId,
+      eventType: "iot_device.created",
+      resourceType: "iot_device",
+      resourceId: String(created.id),
+      payload: { deviceKey: input.deviceKey, meterId: input.meterId },
+    });
+    return { id: created.id };
+  });
+}
+
+export async function listIotDevices(organizationId: number) {
+  const database = await requireDb();
+  return database.select().from(iotDevices).where(eq(iotDevices.organizationId, organizationId)).orderBy(iotDevices.displayName);
+}
+
+export async function getIotDeviceForTelemetry(organizationId: number, deviceKey: string) {
+  const database = await requireDb();
+  const result = await database
+    .select({ device: iotDevices, meter: meters })
+    .from(iotDevices)
+    .innerJoin(meters, eq(iotDevices.meterId, meters.id))
+    .where(and(eq(iotDevices.organizationId, organizationId), eq(iotDevices.deviceKey, deviceKey), eq(meters.isActive, true)))
+    .limit(1);
+  return result[0];
+}
+
+export async function updateIotDeviceStatus(input: {
+  organizationId: number;
+  deviceId: number;
+  status: "active" | "suspended" | "revoked" | "decommissioned";
+  userId: number;
+}) {
+  const database = await requireDb();
+  return database.transaction(async (tx) => {
+    const [device] = await tx.select().from(iotDevices).where(and(eq(iotDevices.id, input.deviceId), eq(iotDevices.organizationId, input.organizationId))).limit(1);
+    if (!device) return null;
+    await tx.update(iotDevices).set({ status: input.status }).where(eq(iotDevices.id, input.deviceId));
+    await tx.insert(auditEvents).values({
+      organizationId: input.organizationId,
+      actorUserId: input.userId,
+      eventType: "iot_device.status_updated",
+      resourceType: "iot_device",
+      resourceId: String(input.deviceId),
+      payload: { previousStatus: device.status, nextStatus: input.status },
+    });
+    return { ...device, status: input.status };
+  });
+}
+
+export async function rotateIotDeviceCredential(input: {
+  organizationId: number;
+  deviceId: number;
+  credentialHash: string;
+  userId: number;
+}) {
+  const database = await requireDb();
+  return database.transaction(async (tx) => {
+    const [device] = await tx.select().from(iotDevices).where(and(eq(iotDevices.id, input.deviceId), eq(iotDevices.organizationId, input.organizationId))).limit(1);
+    if (!device || device.status === "revoked" || device.status === "decommissioned") return null;
+    const credentialVersion = device.credentialVersion + 1;
+    await tx.update(iotDevices).set({ credentialHash: input.credentialHash, credentialVersion }).where(eq(iotDevices.id, input.deviceId));
+    await tx.insert(auditEvents).values({
+      organizationId: input.organizationId,
+      actorUserId: input.userId,
+      eventType: "iot_device.credential_rotated",
+      resourceType: "iot_device",
+      resourceId: String(input.deviceId),
+      payload: { previousCredentialVersion: device.credentialVersion, credentialVersion },
+    });
+    return { id: device.id, credentialVersion };
+  });
+}
+
+export async function getIotTelemetryReceipt(deviceId: number, messageId: string) {
+  const database = await requireDb();
+  const result = await database.select().from(iotTelemetryReceipts).where(and(eq(iotTelemetryReceipts.deviceId, deviceId), eq(iotTelemetryReceipts.messageId, messageId))).limit(1);
+  return result[0];
+}
+
+export async function recordIotTelemetryReceipt(input: {
+  organizationId: number;
+  deviceId: number;
+  readingId: number;
+  messageId: string;
+  observedAt: Date;
+  payloadHash: string;
+  actorUserId: number;
+}) {
+  const database = await requireDb();
+  return database.transaction(async (tx) => {
+    const [created] = await tx.insert(iotTelemetryReceipts).values({
+      organizationId: input.organizationId,
+      deviceId: input.deviceId,
+      readingId: input.readingId,
+      messageId: input.messageId,
+      observedAt: input.observedAt,
+      payloadHash: input.payloadHash,
+    }).$returningId();
+    await tx.update(iotDevices).set({ lastSeenAt: new Date() }).where(eq(iotDevices.id, input.deviceId));
+    await tx.insert(auditEvents).values({
+      organizationId: input.organizationId,
+      actorUserId: input.actorUserId,
+      eventType: "iot_telemetry.accepted",
+      resourceType: "iot_telemetry_receipt",
+      resourceId: String(created.id),
+      payload: { deviceId: input.deviceId, readingId: input.readingId, messageId: input.messageId },
+    });
+    return { id: created.id };
+  });
 }
 
 export async function ingestReading(input: {

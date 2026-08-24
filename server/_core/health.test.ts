@@ -20,6 +20,7 @@ describe("operational health contracts", () => {
         service: "ecosphere-ai",
         dependencies: {
           database: "configured",
+          authentication: "configured",
           scheduler: SCHEDULER_READINESS,
         },
         timestamp: "2026-08-22T08:40:00.000Z",
@@ -35,6 +36,23 @@ describe("operational health contracts", () => {
         service: "ecosphere-ai",
         dependencies: {
           database: "unavailable",
+          authentication: "configured",
+          scheduler: SCHEDULER_READINESS,
+        },
+        timestamp: "2026-08-22T08:40:00.000Z",
+      },
+    });
+  });
+
+  it("fails readiness when authentication configuration is unavailable", () => {
+    expect(createReadinessResponse(true, at, false)).toEqual({
+      status: 503,
+      body: {
+        ok: false,
+        service: "ecosphere-ai",
+        dependencies: {
+          database: "configured",
+          authentication: "unavailable",
           scheduler: SCHEDULER_READINESS,
         },
         timestamp: "2026-08-22T08:40:00.000Z",

@@ -8,12 +8,17 @@ export function createLivenessPayload(now: Date = new Date()) {
   };
 }
 
-export function createReadinessResponse(databaseAvailable: boolean, now: Date = new Date()) {
+export function createReadinessResponse(
+  databaseAvailable: boolean,
+  now: Date = new Date(),
+  authenticationConfigured = true,
+) {
   const body = {
-    ok: databaseAvailable,
+    ok: databaseAvailable && authenticationConfigured,
     service: "ecosphere-ai",
     dependencies: {
       database: databaseAvailable ? "configured" : "unavailable",
+      authentication: authenticationConfigured ? "configured" : "unavailable",
       scheduler: SCHEDULER_READINESS,
     },
     timestamp: now.toISOString(),

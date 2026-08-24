@@ -1,4 +1,4 @@
-import { AXIOS_TIMEOUT_MS, COOKIE_NAME, ONE_YEAR_MS, decodeOAuthState } from "@shared/const";
+import { AXIOS_TIMEOUT_MS, COOKIE_NAME, decodeOAuthState } from "@shared/const";
 import { ForbiddenError } from "@shared/_core/errors";
 import axios, { type AxiosInstance } from "axios";
 import { parse as parseCookieHeader } from "cookie";
@@ -6,7 +6,7 @@ import type { Request } from "express";
 import { SignJWT, jwtVerify } from "jose";
 import type { User } from "../../drizzle/schema";
 import * as db from "../db";
-import { ENV } from "./env";
+import { ENV, hasStrongSessionSecret } from "./env";
 import type {
   ExchangeTokenRequest,
   ExchangeTokenResponse,
@@ -22,11 +22,13 @@ export type SessionPayload = {
   openId: string;
   appId: string;
   name: string;
+  sessionVersion: number;
 };
 
 const EXCHANGE_TOKEN_PATH = `/webdev.v1.WebDevAuthPublicService/ExchangeToken`;
 const GET_USER_INFO_PATH = `/webdev.v1.WebDevAuthPublicService/GetUserInfo`;
 const GET_USER_INFO_WITH_JWT_PATH = `/webdev.v1.WebDevAuthPublicService/GetUserInfoWithJwt`;
+export const SESSION_MAX_AGE_MS = 1000 * 60 * 60 * 12;
 
 class OAuthService {
   constructor(private client: ReturnType<typeof axios.create>) {
@@ -155,6 +157,9 @@ class SDKServer {
 
   private getSessionSecret() {
     const secret = ENV.cookieSecret;
+    if (!hasStrongSessionSecret(secret)) {
+      throw new Error("Session signing is unavailable until a strong JWT_SECRET is configured.");
+    }
     return new TextEncoder().encode(secret);
   }
 
@@ -165,13 +170,14 @@ class SDKServer {
    */
   async createSessionToken(
     openId: string,
-    options: { expiresInMs?: number; name?: string } = {}
+    options: { expiresInMs?: number; name?: string; sessionVersion?: number } = {}
   ): Promise<string> {
     return this.signSession(
       {
         openId,
         appId: ENV.appId,
         name: options.name || "",
+        sessionVersion: options.sessionVersion ?? 1,
       },
       options
     );
@@ -182,7 +188,7 @@ class SDKServer {
     options: { expiresInMs?: number } = {}
   ): Promise<string> {
     const issuedAt = Date.now();
-    const expiresInMs = options.expiresInMs ?? ONE_YEAR_MS;
+    const expiresInMs = options.expiresInMs ?? SESSION_MAX_AGE_MS;
     const expirationSeconds = Math.floor((issuedAt + expiresInMs) / 1000);
     const secretKey = this.getSessionSecret();
 
@@ -190,6 +196,7 @@ class SDKServer {
       openId: payload.openId,
       appId: payload.appId,
       name: payload.name,
+      sessionVersion: payload.sessionVersion,
     })
       .setProtectedHeader({ alg: "HS256", typ: "JWT" })
       .setExpirationTime(expirationSeconds)
@@ -198,7 +205,7 @@ class SDKServer {
 
   async verifySession(
     cookieValue: string | undefined | null
-  ): Promise<{ openId: string; appId: string; name: string } | null> {
+  ): Promise<{ openId: string; appId: string; name: string; sessionVersion: number } | null> {
     if (!cookieValue) {
       console.warn("[Auth] Missing session cookie");
       return null;
@@ -209,14 +216,21 @@ class SDKServer {
       const { payload } = await jwtVerify(cookieValue, secretKey, {
         algorithms: ["HS256"],
       });
-      const { openId, appId, name } = payload as Record<string, unknown>;
+      const { openId, appId, name, sessionVersion } = payload as Record<string, unknown>;
 
       if (
         !isNonEmptyString(openId) ||
         !isNonEmptyString(appId) ||
-        !isNonEmptyString(name)
+        !isNonEmptyString(name) ||
+        !Number.isInteger(sessionVersion) ||
+        (sessionVersion as number) < 1
       ) {
         console.warn("[Auth] Session payload missing required fields");
+        return null;
+      }
+
+      if (ENV.appId && appId !== ENV.appId) {
+        console.warn("[Auth] Session app identifier did not match this deployment");
         return null;
       }
 
@@ -224,6 +238,7 @@ class SDKServer {
         openId,
         appId,
         name,
+        sessionVersion: sessionVersion as number,
       };
     } catch (error) {
       console.warn("[Auth] Session verification failed", String(error));
@@ -263,7 +278,8 @@ class SDKServer {
     // 2. Fallback to the Authorization header (Preview auto-login via
     //    sessionStorage), used when the browser blocks iframe cookies such as
     //    Safari ITP, private browsing, or iOS/Android WebView.
-    if (!sessionToken) {
+    const allowBearerSessions = process.env.NODE_ENV !== "production" || process.env.ALLOW_BEARER_SESSIONS === "true";
+    if (!sessionToken && allowBearerSessions) {
       const authHeader = req.headers.authorization;
       if (typeof authHeader === "string" && authHeader.startsWith("Bearer ")) {
         sessionToken = authHeader.slice(7);
@@ -309,6 +325,10 @@ class SDKServer {
 
     if (!user) {
       throw ForbiddenError("User not found");
+    }
+
+    if (session.sessionVersion !== user.sessionVersion) {
+      throw ForbiddenError("Session was revoked. Sign in again.");
     }
 
     await db.upsertUser({
