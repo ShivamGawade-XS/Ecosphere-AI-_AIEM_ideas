@@ -21,7 +21,7 @@ import {
 } from "@/components/ui/sidebar";
 import { startLogin } from "@/const";
 import { useIsMobile } from "@/hooks/useMobile";
-import { BrainCircuit, Building2, Calculator, ClipboardCheck, FileText, FileUp, House, LayoutDashboard, LogOut, PanelLeft, Radar, Settings2 } from "lucide-react";
+import { ArrowUpRight, BrainCircuit, Building2, Calculator, ClipboardCheck, FileText, FileUp, House, LayoutDashboard, LogOut, PanelLeft, Radar, Settings2 } from "lucide-react";
 import React, { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { DashboardLayoutSkeleton } from './DashboardLayoutSkeleton';
@@ -67,31 +67,21 @@ export default function DashboardLayout({
 
   if (!user) {
     return (
-      <div className="flex items-center justify-center min-h-screen p-6">
-        <div className="flex flex-col items-center gap-6 p-8 max-w-md w-full rounded-2xl border border-border bg-card text-card-foreground shadow-sm">
-          <EcoSphereMark />
-          <div className="flex flex-col items-center gap-6">
-            <p className="text-xs font-bold tracking-[.16em] text-muted-foreground text-center">
-              AI-POWERED SUSTAINABILITY MISSION CONTROL
-            </p>
-            <h1 className="text-2xl font-semibold tracking-tight text-center">
-              Enter your organization workspace
-            </h1>
-            <p className="text-sm text-muted-foreground text-center max-w-sm">
-              Sign in to access tenant-scoped sustainability evidence, controlled simulation, scenarios, alerts, and accountable actions. The public narrative remains available without a workspace session.
-            </p>
+      <div className="access-docket-shell">
+        <section className="access-docket" aria-labelledby="access-docket-title">
+          <div className="access-docket__rail"><span>ACCESS DOCKET · AIEM CAMPUS PILOT</span><b>AUTHENTICATION REQUIRED</b></div>
+          <header className="access-docket__header"><EcoSphereMark /><span>AI-POWERED SUSTAINABILITY MISSION CONTROL</span></header>
+          <div className="access-docket__body">
+            <span className="ops-eyebrow">TENANT EVIDENCE BOUNDARY</span>
+            <h1 id="access-docket-title">Open the <em>organization evidence ledger.</em></h1>
+            <p>Workspace access is required to inspect tenant-scoped readings, controlled simulation, scenarios, alerts, and accountable actions. Public pilot material remains available without a workspace session.</p>
+            <dl><div><dt>RECORD SCOPE</dt><dd>Tenant-scoped · audited</dd></div><div><dt>DEMO STATUS</dt><dd>Explicitly simulated when enabled</dd></div><div><dt>NUMERIC AUTHORITY</dt><dd>Deterministic server calculations</dd></div></dl>
           </div>
-          <Button
-            onClick={() => startLogin()}
-            size="lg"
-            className="w-full shadow-lg hover:shadow-xl transition-all"
-          >
-            Sign in
-          </Button>
-          <a href="/narrative" className="text-sm font-medium text-primary underline underline-offset-4">
-            Explore the public product narrative
-          </a>
-        </div>
+          <div className="access-docket__actions">
+            <Button onClick={() => startLogin()} size="lg" className="access-docket__primary">Authenticate workspace access</Button>
+            <a href="/narrative">Inspect the public pilot narrative <ArrowUpRight size={15}/></a>
+          </div>
+        </section>
       </div>
     );
   }

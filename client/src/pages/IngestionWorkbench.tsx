@@ -1,4 +1,5 @@
 import { trpc } from "@/lib/trpc";
+import { createManualReadingIdempotencyKey } from "@/lib/manualReading";
 import { CheckCircle2, Database, FileSpreadsheet, Loader2, Plus, Radio, Send, ShieldCheck, Upload } from "lucide-react";
 import React, { FormEvent, useEffect, useState } from "react";
 
@@ -21,6 +22,7 @@ export default function IngestionWorkbench() {
   const [meterKey, setMeterKey] = useState("hvac-main");
   const [resourceType, setResourceType] = useState<"energy" | "water" | "waste" | "fuel" | "renewable">("energy");
   const [readingValue, setReadingValue] = useState("112.5");
+  const [readingObservedAt, setReadingObservedAt] = useState(() => new Date().toISOString().slice(0, 16));
   const [csvFile, setCsvFile] = useState<File | null>(null);
   const [csvPreview, setCsvPreview] = useState<{ importFileId: number; fileName: string; validRows: number; rejectedRows: number } | null>(null);
   const [factorVersion, setFactorVersion] = useState("aiem-electricity-v1");
@@ -31,7 +33,8 @@ export default function IngestionWorkbench() {
   const [correctionReadingId, setCorrectionReadingId] = useState<number | null>(null);
   const [correctionValue, setCorrectionValue] = useState("");
   const [correctionReason, setCorrectionReason] = useState("");
-  const [notice, setNotice] = useState<string | null>(null);
+  const [notice, setNotice] = useState<{ message: string; tone: "status" | "error" } | null>(null);
+  const showNotice = (message: string, tone: "status" | "error" = "status") => setNotice({ message, tone });
 
   useEffect(() => {
     if (!organizationId && organizationsQuery.data?.[0]) setOrganizationId(organizationsQuery.data[0].organization.id);
@@ -55,31 +58,31 @@ export default function IngestionWorkbench() {
     }
   }, [correctionReadingId, readingsQuery.data]);
 
-  const createOrganization = trpc.organizations.create.useMutation({ onSuccess: async (created) => { await utils.organizations.mine.invalidate(); setOrganizationId(created.id); setNotice("Organization created. Add its first operational site."); } });
-  const createSite = trpc.sites.create.useMutation({ onSuccess: async (created) => { if (organizationId) await utils.sites.list.invalidate({ organizationId }); setSiteId(created.id); setNotice("Site registered. Add a canonical meter before ingesting data."); } });
-  const createMeter = trpc.meters.create.useMutation({ onSuccess: async (created) => { if (organizationId) await utils.meters.list.invalidate({ organizationId }); setMeterId(created.id); setNotice("Meter registered. The live reading endpoint is ready."); } });
-  const ingestReading = trpc.readings.ingest.useMutation({ onSuccess: async (result) => { if (organizationId) await Promise.all([utils.ingestion.recent.invalidate({ organizationId }), utils.readings.recent.invalidate({ organizationId })]); setNotice(result.idempotent ? "This reading was already accepted; duplicate data was not created." : "Reading accepted and recorded with provenance."); } });
+  const createOrganization = trpc.organizations.create.useMutation({ onSuccess: async (created) => { await utils.organizations.mine.invalidate(); setOrganizationId(created.id); showNotice("Organization created. Add its first operational site."); }, onError: (error) => showNotice(`Organization was not created: ${error.message}`, "error") });
+  const createSite = trpc.sites.create.useMutation({ onSuccess: async (created) => { if (organizationId) await utils.sites.list.invalidate({ organizationId }); setSiteId(created.id); showNotice("Site registered. Add a canonical meter before ingesting data."); }, onError: (error) => showNotice(`Site was not registered: ${error.message}`, "error") });
+  const createMeter = trpc.meters.create.useMutation({ onSuccess: async (created) => { if (organizationId) await utils.meters.list.invalidate({ organizationId }); setMeterId(created.id); showNotice("Meter registered. The live reading endpoint is ready."); }, onError: (error) => showNotice(`Meter was not registered: ${error.message}`, "error") });
+  const ingestReading = trpc.readings.ingest.useMutation({ onSuccess: async (result) => { if (organizationId) await Promise.all([utils.ingestion.recent.invalidate({ organizationId }), utils.readings.recent.invalidate({ organizationId })]); showNotice(result.idempotent ? "This reading was already accepted; duplicate data was not created." : "Reading accepted and recorded with provenance."); }, onError: (error) => showNotice(`Reading was not accepted: ${error.message}`, "error") });
   const previewCsvImport = trpc.imports.preview.useMutation({
     onSuccess: async (result) => {
       if (!organizationId) return;
       setCsvPreview({ importFileId: result.importFile.id, fileName: result.importFile.fileName, validRows: result.importFile.validRows, rejectedRows: result.importFile.rejectedRows });
       setSelectedImportId(result.importFile.id);
       await utils.imports.list.invalidate({ organizationId });
-      setNotice(result.idempotent ? "This source file was already previewed; its original validation evidence has been retained." : `${result.importFile.validRows} row(s) validated; ${result.importFile.rejectedRows} row(s) quarantined with persistent evidence.`);
+      showNotice(result.idempotent ? "This source file was already previewed; its original validation evidence has been retained." : `${result.importFile.validRows} row(s) validated; ${result.importFile.rejectedRows} row(s) quarantined with persistent evidence.`);
     },
-    onError: (error) => setNotice(`CSV preview failed: ${error.message}`),
+    onError: (error) => showNotice(`CSV preview failed: ${error.message}`, "error"),
   });
   const commitCsvImport = trpc.imports.commit.useMutation({
     onSuccess: async (result) => {
       if (!organizationId) return;
       await Promise.all([utils.imports.list.invalidate({ organizationId }), utils.ingestion.recent.invalidate({ organizationId }), utils.readings.recent.invalidate({ organizationId })]);
-      setNotice(result.idempotent ? "This CSV batch was already committed; duplicate readings were not created." : `CSV batch committed: ${result.acceptedRows} accepted and ${result.rejectedRows} quarantined.`);
+      showNotice(result.idempotent ? "This CSV batch was already committed; duplicate readings were not created." : `CSV batch committed: ${result.acceptedRows} accepted and ${result.rejectedRows} quarantined.`);
     },
-    onError: (error) => setNotice(`CSV commit failed: ${error.message}`),
+    onError: (error) => showNotice(`CSV commit failed: ${error.message}`, "error"),
   });
-  const createFactor = trpc.factors.create.useMutation({ onSuccess: async () => { if (organizationId) await utils.factors.list.invalidate({ organizationId }); setNotice("Factor draft saved. A manager or owner must approve it before monitored carbon calculations can use it."); }, onError: (error) => setNotice(error.message) });
-  const approveFactor = trpc.factors.approve.useMutation({ onSuccess: async () => { if (organizationId) await utils.factors.list.invalidate({ organizationId }); setNotice("Factor approved. Future eligible energy calculations will select it by unit and validity period."); }, onError: (error) => setNotice(error.message) });
-  const correctReading = trpc.readings.correct.useMutation({ onSuccess: async () => { if (organizationId) await utils.readings.recent.invalidate({ organizationId }); setCorrectionReason(""); setNotice("Correction approved. The raw reading is retained, superseded, and excluded from future monitoring baselines."); }, onError: (error) => setNotice(`Correction failed: ${error.message}`) });
+  const createFactor = trpc.factors.create.useMutation({ onSuccess: async () => { if (organizationId) await utils.factors.list.invalidate({ organizationId }); showNotice("Factor draft saved. A manager or owner must approve it before monitored carbon calculations can use it."); }, onError: (error) => showNotice(error.message, "error") });
+  const approveFactor = trpc.factors.approve.useMutation({ onSuccess: async () => { if (organizationId) await utils.factors.list.invalidate({ organizationId }); showNotice("Factor approved. Future eligible energy calculations will select it by unit and validity period."); }, onError: (error) => showNotice(error.message, "error") });
+  const correctReading = trpc.readings.correct.useMutation({ onSuccess: async () => { if (organizationId) await utils.readings.recent.invalidate({ organizationId }); setCorrectionReason(""); showNotice("Correction approved. The raw reading is retained, superseded, and excluded from future monitoring baselines."); }, onError: (error) => showNotice(`Correction failed: ${error.message}`, "error") });
 
   function submitOrganization(event: FormEvent) { event.preventDefault(); createOrganization.mutate({ name: organizationName }); }
   function submitSite(event: FormEvent) { event.preventDefault(); if (organizationId) createSite.mutate({ organizationId, name: siteName, code: siteCode, timezone: "Asia/Kolkata" }); }
@@ -88,7 +91,14 @@ export default function IngestionWorkbench() {
     event.preventDefault();
     const meter = metersQuery.data?.find((item) => item.id === meterId);
     if (!organizationId || !siteId || !meterId || !meter) return;
-    ingestReading.mutate({ organizationId, siteId, meterId, observedAt: new Date(), value: Number(readingValue), unit: meter.canonicalUnit, source: "manual", idempotencyKey: `manual-${meterId}-${Date.now()}`, provenance: { entryMethod: "operations-workbench", label: "Manual operational entry" } });
+    try {
+      const observedAt = new Date(readingObservedAt);
+      const value = Number(readingValue);
+      const idempotencyKey = createManualReadingIdempotencyKey({ meterId, observedAt, value, unit: meter.canonicalUnit });
+      ingestReading.mutate({ organizationId, siteId, meterId, observedAt, value, unit: meter.canonicalUnit, source: "manual", idempotencyKey, provenance: { entryMethod: "operations-workbench", label: "Manual operational entry", idempotencyContract: "manual-v1 canonical meter, observation-time, value, and unit" } });
+    } catch (error) {
+      showNotice(error instanceof Error ? error.message : "The manual reading could not be prepared safely.", "error");
+    }
   }
   async function submitCsvPreview(event: FormEvent) { event.preventDefault(); if (organizationId && csvFile) previewCsvImport.mutate({ organizationId, fileName: csvFile.name, csvText: await csvFile.text() }); }
   function submitFactor(event: FormEvent) { event.preventDefault(); if (organizationId) createFactor.mutate({ organizationId, resourceType: "energy", inputUnit: "kWh", emittedKgCo2ePerUnit: Number(factorValue), scope: "Scope 2", geography: factorGeography, methodology: "Versioned organization factor selected by resource, unit, and validity period.", sourceName: factorSource, factorVersion, validFrom: new Date() }); }
@@ -98,12 +108,12 @@ export default function IngestionWorkbench() {
 
   return <div className="workbench-canvas">
     <section className="workbench-hero"><div><span className="ops-eyebrow"><span /> LIVE DATA FOUNDATION</span><h1>Register a source.<br /><em>Protect the evidence.</em></h1><p>This workbench exercises the authenticated registry and ingestion APIs. Each accepted reading is scoped to an organization, validated against a canonical meter unit, deduplicated, and written with provenance.</p></div><div className="workbench-hero__signal"><Radio size={28} /><b>DATA INTAKE</b><span>auth · validation · provenance</span></div></section>
-    {notice && <div className="workbench-notice" role="status"><CheckCircle2 size={18} /> {notice}</div>}
+    {notice && <div className="workbench-notice" role={notice.tone === "error" ? "alert" : "status"} aria-live={notice.tone === "error" ? "assertive" : "polite"}><CheckCircle2 size={18} /> {notice.message}</div>}
     <section className="workbench-flow">
       <form onSubmit={submitOrganization} className="workbench-step"><span>01 · TENANT</span><h2>Organization</h2><p>Begin a tenant-scoped operational environment.</p><input value={organizationName} onChange={(event) => setOrganizationName(event.target.value)} aria-label="Organization name" required minLength={3} /><button disabled={isWorking}>{createOrganization.isPending ? <Loader2 className="animate-spin" /> : <Plus />} Create organization</button></form>
       <form onSubmit={submitSite} className="workbench-step"><span>02 · LOCATION</span><h2>Site</h2><p>Register a campus or building within the selected tenant.</p><input value={siteName} onChange={(event) => setSiteName(event.target.value)} aria-label="Site name" required /><input value={siteCode} onChange={(event) => setSiteCode(event.target.value.toUpperCase())} aria-label="Site code" required pattern="[A-Z0-9_-]{2,64}" /><button disabled={!organizationId || isWorking}>{createSite.isPending ? <Loader2 className="animate-spin" /> : <Plus />} Register site</button></form>
       <form onSubmit={submitMeter} className="workbench-step"><span>03 · SOURCE</span><h2>Meter</h2><p>Set a canonical resource type and unit before any reading arrives.</p><input value={meterName} onChange={(event) => setMeterName(event.target.value)} aria-label="Meter display name" required /><input value={meterKey} onChange={(event) => setMeterKey(event.target.value.toLowerCase())} aria-label="Meter key" required pattern="[a-z0-9_-]{3,96}" /><select value={resourceType} onChange={(event) => setResourceType(event.target.value as typeof resourceType)} aria-label="Resource type">{Object.keys(resourceUnits).map((type) => <option value={type} key={type}>{type} · {resourceUnits[type]}</option>)}</select><button disabled={!organizationId || !siteId || isWorking}>{createMeter.isPending ? <Loader2 className="animate-spin" /> : <Database />} Register meter</button></form>
-      <form onSubmit={submitReading} className="workbench-step workbench-step--accent"><span>04 · INGEST</span><h2>Reading</h2><p>Submit one validated, idempotent manual measurement to the selected meter. Controlled simulated evidence is available only through the Guided Campus Simulation so it remains resettable and visibly distinguished from operational data.</p><select value={meterId ?? ""} onChange={(event) => setMeterId(Number(event.target.value))} aria-label="Target meter"><option value="" disabled>Select a meter</option>{metersQuery.data?.map((meter) => <option value={meter.id} key={meter.id}>{meter.displayName} · {meter.canonicalUnit}</option>)}</select><input value={readingValue} onChange={(event) => setReadingValue(event.target.value)} aria-label="Reading value" type="number" min="0" step="0.01" required /><button disabled={!meterId || isWorking}>{ingestReading.isPending ? <Loader2 className="animate-spin" /> : <Send />} Ingest reading</button></form>
+      <form onSubmit={submitReading} className="workbench-step workbench-step--accent"><span>04 · INGEST</span><h2>Reading</h2><p>Submit one validated, idempotent manual measurement to the selected meter. Retrying the same meter, observation time, value, and unit cannot create a duplicate. Controlled simulated evidence is available only through the Guided Campus Simulation so it remains resettable and visibly distinguished from operational data.</p><select value={meterId ?? ""} onChange={(event) => setMeterId(Number(event.target.value))} aria-label="Target meter"><option value="" disabled>Select a meter</option>{metersQuery.data?.map((meter) => <option value={meter.id} key={meter.id}>{meter.displayName} · {meter.canonicalUnit}</option>)}</select><input value={readingObservedAt} onChange={(event) => setReadingObservedAt(event.target.value)} aria-label="Observation time" type="datetime-local" required /><input value={readingValue} onChange={(event) => setReadingValue(event.target.value)} aria-label="Reading value" type="number" min="0" step="0.01" required /><button type="submit" disabled={!meterId || isWorking}>{ingestReading.isPending ? <Loader2 className="animate-spin" /> : <Send />} Ingest reading</button></form>
     </section>
 
     <section className="ingestion-history"><header><div><span className="ops-eyebrow">INGESTION AUDIT</span><h2>Recent protected submissions</h2></div><ShieldCheck size={24} /></header>{batchesQuery.isLoading ? <p>Loading ingestion evidence…</p> : batchesQuery.data?.length ? <div className="ingestion-table">{batchesQuery.data.map((batch) => <div key={batch.id}><span>#{batch.id}</span><b>{batch.source.toUpperCase()}</b><span>{batch.status.replaceAll("_", " ")}</span><span>{batch.acceptedRows} accepted</span><time>{new Date(batch.createdAt).toLocaleString()}</time></div>)}</div> : <p>No readings have been submitted for the selected organization yet.</p>}</section>

@@ -261,3 +261,10 @@
 - [x] Bound local MySQL/TiDB connection-pool queueing so a busy process cannot retain unlimited pending database work.
 - [x] Add a tenant-scoped evidence timeline that links persisted monitoring events, recommendations, and accountable actions without fabricating missing lineage.
 - [x] Add transparent deterministic forecast-model comparison and backtest-based selection without claiming predictive accuracy.
+- [x] Conduct a fresh evidence-led product, workflow, security, reliability, accessibility, and demo-readiness audit after the latest local enhancements.
+- [x] Implement and verify the highest-value remaining locally feasible product enhancement identified by the fresh audit without claiming unconfigured external operations.
+- [x] Replace client-clock manual-reading idempotency keys with canonical deterministic submission keys and clear duplicate-submission feedback.
+- [x] Sanitize spreadsheet-dangerous CSV export cells while preserving tenant-scoped stored snapshot evidence.
+- [x] Add a focused first-run demo checklist that distinguishes simulated evidence and links operators directly to the guided simulation controls.
+- [x] Improve key workspace mutation feedback with consistent polite status and alert semantics without hiding server errors.
+- [x] Align the signed-out workspace entry with the Field Operations Ledger design system using clear access-provenance and evidence-boundary language.

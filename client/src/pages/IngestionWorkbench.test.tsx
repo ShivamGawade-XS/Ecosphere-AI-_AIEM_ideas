@@ -86,6 +86,7 @@ describe("IngestionWorkbench", () => {
     render(<IngestionWorkbench />);
     fireEvent.click(screen.getByRole("button", { name: "Create organization" }));
     expect(await screen.findByText("Organization created. Add its first operational site.")).toBeTruthy();
+    expect(screen.getByRole("status").textContent).toMatch(/Organization created/);
   });
 
   it("enables the registry progression and announces site and meter registration feedback", async () => {
@@ -139,7 +140,7 @@ describe("IngestionWorkbench", () => {
     fireEvent.click(screen.getByRole("button", { name: "Ingest reading" }));
 
     expect(screen.queryByLabelText("Reading source")).toBeNull();
-    expect(submitted).toMatchObject({ source: "manual", provenance: { entryMethod: "operations-workbench", label: "Manual operational entry" } });
+    expect(submitted).toMatchObject({ source: "manual", idempotencyKey: expect.stringMatching(/^manual-v1:44:/), provenance: { entryMethod: "operations-workbench", label: "Manual operational entry", idempotencyContract: "manual-v1 canonical meter, observation-time, value, and unit" } });
     expect(await screen.findByText(/Controlled simulated evidence is available only through the Guided Campus Simulation/)).toBeTruthy();
   });
 
@@ -157,6 +158,7 @@ describe("IngestionWorkbench", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Save factor draft" }));
     expect(await screen.findByText("A manager must use a distinct approved source version.")).toBeTruthy();
+    expect(screen.getByRole("alert").textContent).toMatch(/distinct approved source version/);
   });
 
   it("renders the governed factor selected by the worker with its version, unit, and approval evidence", async () => {
@@ -200,6 +202,7 @@ describe("IngestionWorkbench", () => {
     fireEvent.change(fileInput, { target: { files: [file] } });
     fireEvent.submit(fileInput.closest("form")!);
     expect(await screen.findByText("CSV preview failed: CSV headers do not match the required source contract.")).toBeTruthy();
+    expect(screen.getByRole("alert").textContent).toMatch(/CSV preview failed/);
   });
 
   it("surfaces CSV commit failures while retaining the validated preview for recovery", async () => {

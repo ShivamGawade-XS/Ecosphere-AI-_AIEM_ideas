@@ -138,6 +138,13 @@ describe("authenticated ecosystem workspaces", () => {
     expect(screen.getByText("Only tenant owners and managers can create, advance, inject, or reset simulated tenant evidence.")).toBeTruthy();
   });
 
+  it("provides a guided first-run checklist that separates simulated demo evidence from operational records", () => {
+    render(<OperationsOverview />);
+    expect(screen.getByRole("region", { name: "Guided demo first-run checklist" })).toBeTruthy();
+    expect(screen.getByText(/manual or imported records remain operational evidence and are not reset/i)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Open guided demo controls" })).toBeTruthy();
+  });
+
   it("keeps protected overview, reading, and action failures explicit instead of fabricating empty dashboard state", () => {
     testApi.overview.mockReturnValue({ ...query(undefined), error: new Error("network") });
     testApi.recentReadings.mockReturnValue({ ...query(undefined), error: new Error("forbidden") });

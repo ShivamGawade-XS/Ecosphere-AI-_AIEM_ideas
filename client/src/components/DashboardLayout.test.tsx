@@ -40,8 +40,10 @@ describe("DashboardLayout operational index", () => {
   it("explains the protected workspace and preserves a public-narrative escape route when signed out", () => {
     auth.state = { loading: false, user: null, logout: vi.fn() };
     render(<DashboardLayout><div>Protected content</div></DashboardLayout>);
-    expect(screen.getByRole("heading", { name: "Enter your organization workspace" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Sign in" })).toBeTruthy();
-    expect(screen.getByRole("link", { name: "Explore the public product narrative" }).getAttribute("href")).toBe("/narrative");
+    expect(screen.getByRole("heading", { name: "Open the organization evidence ledger." })).toBeTruthy();
+    expect(screen.getByText("TENANT EVIDENCE BOUNDARY")).toBeTruthy();
+    expect(screen.getByText("Explicitly simulated when enabled")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Authenticate workspace access" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: /Inspect the public pilot narrative/i }).getAttribute("href")).toBe("/narrative");
   });
 });
