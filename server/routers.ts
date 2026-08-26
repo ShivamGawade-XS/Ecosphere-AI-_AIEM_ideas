@@ -9,7 +9,9 @@ import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
 import { COOKIE_NAME } from "../shared/const";
-import { calculateScenario, SCENARIO_CALCULATION_VERSION } from "./domain/scenarios";
+import { calculateScenario, getScenarioMethodology, SCENARIO_CALCULATION_VERSION } from "./domain/scenarios";
+import { calculateScenarioSensitivity } from "./domain/scenarioSensitivity";
+import { optimizeInterventionPortfolio } from "./domain/portfolioOptimizer";
 import { runMonitoringForOrganization } from "./workers/monitoringWorker";
 import { previewCsvImport, MAX_CSV_BYTES } from "./domain/csvImport";
 import { storagePut } from "./storage";
@@ -48,6 +50,22 @@ const scenarioAssumptionsSchema = z.object({
   wasteReductionPct: z.number().finite().min(0).max(100),
   recyclingPct: z.number().finite().min(0).max(100),
   investmentInr: z.number().finite().nonnegative().max(999_999_999),
+  baselineReference: z.object({
+    baselineId: z.number().int().positive(),
+    meterId: z.number().int().positive(),
+    resourceType: z.enum(["energy", "water", "waste"]),
+    aggregateValue: z.number().finite().nonnegative().max(999_999_999),
+    unit: z.string().trim().min(1).max(24),
+    windowStart: z.string().datetime(),
+    windowEnd: z.string().datetime(),
+    includesSimulatedEvidence: z.boolean(),
+  }).optional(),
+});
+const sensitivityCaseSchema = z.object({
+  performancePct: z.number().finite().min(0).max(150),
+  capexMultiplier: z.number().finite().min(0.1).max(5),
+  tariffMultiplier: z.number().finite().min(0.1).max(5),
+  carbonFactorMultiplier: z.number().finite().min(0.1).max(5),
 });
 
 async function requireOrganizationRole(userId: number, organizationId: number, acceptedRoles?: readonly string[]) {
@@ -56,6 +74,25 @@ async function requireOrganizationRole(userId: number, organizationId: number, a
     throw new TRPCError({ code: "FORBIDDEN", message: "You do not have access to this organization." });
   }
   return membership;
+}
+
+async function verifyScenarioBaselineReference(organizationId: number, assumptions: z.infer<typeof scenarioAssumptionsSchema>) {
+  const reference = assumptions.baselineReference;
+  if (!reference) return;
+  const stored = await db.getOperationalBaseline(organizationId, reference.baselineId);
+  if (!stored) throw new TRPCError({ code: "NOT_FOUND", message: "Selected baseline is not available in this organization." });
+  const baseline = stored.baseline;
+  const valueMatches = Math.abs(Number(baseline.aggregateValue) - reference.aggregateValue) < 0.0001;
+  const metadataMatches = baseline.meterId === reference.meterId
+    && baseline.resourceType === reference.resourceType
+    && baseline.unit === reference.unit
+    && baseline.windowStart.toISOString() === reference.windowStart
+    && baseline.windowEnd.toISOString() === reference.windowEnd
+    && baseline.includesSimulatedEvidence === reference.includesSimulatedEvidence;
+  const assumptionKey = reference.resourceType === "energy" ? "baselineEnergyKwh" : reference.resourceType === "water" ? "baselineWaterM3" : "baselineWasteKg";
+  if (!valueMatches || !metadataMatches || Math.abs(assumptions[assumptionKey] - reference.aggregateValue) >= 0.0001) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: "Selected baseline evidence no longer matches the submitted scenario assumptions." });
+  }
 }
 
 const readinessItems = [
@@ -158,6 +195,33 @@ export const appRouter = router({
         const site = (await db.listSites(input.organizationId)).find((item) => item.id === input.siteId);
         if (!site) throw new TRPCError({ code: "NOT_FOUND", message: "Site not found in this organization." });
         return db.createMeter({ ...input, userId: ctx.user.id });
+      }),
+  }),
+
+  equipment: router({
+    list: protectedProcedure
+      .input(z.object({ organizationId: z.number().int().positive() }))
+      .query(async ({ ctx, input }) => {
+        await requireOrganizationRole(ctx.user.id, input.organizationId);
+        return db.listCampusEquipmentAssets(input.organizationId);
+      }),
+    create: protectedProcedure
+      .input(z.object({ organizationId: z.number().int().positive(), siteId: z.number().int().positive(), meterId: z.number().int().positive().optional(), assetKey: z.string().trim().toLowerCase().regex(/^[a-z0-9_-]{3,96}$/), displayName: z.string().trim().min(3).max(160), assetType: z.string().trim().min(2).max(80), locationDescription: z.string().trim().max(240).optional(), notes: z.string().trim().max(4_000).optional() }))
+      .mutation(async ({ ctx, input }) => {
+        await requireOrganizationRole(ctx.user.id, input.organizationId, mutableRoles);
+        try {
+          return await db.createCampusEquipmentAsset({ ...input, userId: ctx.user.id });
+        } catch (error) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "Equipment asset could not be created." });
+        }
+      }),
+    updateLifecycle: protectedProcedure
+      .input(z.object({ organizationId: z.number().int().positive(), assetId: z.number().int().positive(), lifecycleStatus: z.enum(["active", "maintenance", "retired"]) }))
+      .mutation(async ({ ctx, input }) => {
+        await requireOrganizationRole(ctx.user.id, input.organizationId, mutableRoles);
+        const result = await db.updateCampusEquipmentAssetStatus({ ...input, userId: ctx.user.id });
+        if (!result) throw new TRPCError({ code: "NOT_FOUND", message: "Equipment asset not found in this organization." });
+        return result;
       }),
   }),
 
@@ -428,6 +492,56 @@ export const appRouter = router({
       }),
   }),
 
+  baselines: router({
+    list: protectedProcedure
+      .input(z.object({ organizationId: z.number().int().positive() }))
+      .query(async ({ ctx, input }) => {
+        await requireOrganizationRole(ctx.user.id, input.organizationId);
+        return db.listOperationalBaselines(input.organizationId);
+      }),
+    create: protectedProcedure
+      .input(z.object({
+        organizationId: z.number().int().positive(),
+        meterId: z.number().int().positive(),
+        label: z.string().trim().min(3).max(160),
+        windowStart: z.date(),
+        windowEnd: z.date(),
+      }).refine((input) => input.windowEnd > input.windowStart, { path: ["windowEnd"], message: "Baseline end must be after its start." }))
+      .mutation(async ({ ctx, input }) => {
+        await requireOrganizationRole(ctx.user.id, input.organizationId, mutableRoles);
+        try {
+          return await db.createOperationalBaseline({ ...input, userId: ctx.user.id });
+        } catch (error) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "Baseline could not be created." });
+        }
+      }),
+  }),
+
+  outcomes: router({
+    list: protectedProcedure
+      .input(z.object({ organizationId: z.number().int().positive() }))
+      .query(async ({ ctx, input }) => {
+        await requireOrganizationRole(ctx.user.id, input.organizationId);
+        return db.listOutcomeMeasurements(input.organizationId);
+      }),
+    create: protectedProcedure
+      .input(z.object({
+        organizationId: z.number().int().positive(),
+        actionId: z.number().int().positive(),
+        baselineId: z.number().int().positive(),
+        outcomeWindowStart: z.date(),
+        outcomeWindowEnd: z.date(),
+      }).refine((input) => input.outcomeWindowEnd > input.outcomeWindowStart, { path: ["outcomeWindowEnd"], message: "Outcome end must be after its start." }))
+      .mutation(async ({ ctx, input }) => {
+        await requireOrganizationRole(ctx.user.id, input.organizationId, mutableRoles);
+        try {
+          return await db.createOutcomeMeasurement({ ...input, userId: ctx.user.id });
+        } catch (error) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "Outcome measurement could not be created." });
+        }
+      }),
+  }),
+
   monitoring: router({
     status: protectedProcedure
       .input(z.object({ organizationId: z.number().int().positive() }))
@@ -592,12 +706,85 @@ export const appRouter = router({
       }),
   }),
 
+  maintenanceWindows: router({
+    list: protectedProcedure
+      .input(z.object({ organizationId: z.number().int().positive() }))
+      .query(async ({ ctx, input }) => {
+        await requireOrganizationRole(ctx.user.id, input.organizationId);
+        return db.listMaintenanceWindows(input.organizationId);
+      }),
+    create: protectedProcedure
+      .input(z.object({ organizationId: z.number().int().positive(), meterId: z.number().int().positive(), label: z.string().trim().min(3).max(160), reason: z.string().trim().min(3).max(2_000), windowStart: z.date(), windowEnd: z.date() }).refine((value) => value.windowEnd > value.windowStart, { message: "Maintenance window end must be after its start.", path: ["windowEnd"] }))
+      .mutation(async ({ ctx, input }) => {
+        await requireOrganizationRole(ctx.user.id, input.organizationId, mutableRoles);
+        try {
+          return await db.createMaintenanceWindow({ ...input, userId: ctx.user.id });
+        } catch (error) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "Maintenance window could not be created." });
+        }
+      }),
+  }),
+
+  operatingCalendarWindows: router({
+    list: protectedProcedure
+      .input(z.object({ organizationId: z.number().int().positive() }))
+      .query(async ({ ctx, input }) => {
+        await requireOrganizationRole(ctx.user.id, input.organizationId);
+        return db.listOperatingCalendarWindows(input.organizationId);
+      }),
+    create: protectedProcedure
+      .input(z.object({ organizationId: z.number().int().positive(), meterId: z.number().int().positive(), label: z.string().trim().min(3).max(160), timezone: z.string().trim().min(1).max(64), weekdays: z.array(z.number().int().min(0).max(6)).min(1).max(7).refine((days) => new Set(days).size === days.length, { message: "Weekdays must not repeat." }), startMinuteLocal: z.number().int().min(0).max(1_439), endMinuteLocal: z.number().int().min(1).max(1_440) }).refine((value) => value.endMinuteLocal > value.startMinuteLocal, { message: "Operating-window end must be after start within the same local day.", path: ["endMinuteLocal"] }))
+      .mutation(async ({ ctx, input }) => {
+        await requireOrganizationRole(ctx.user.id, input.organizationId, mutableRoles);
+        try {
+          return await db.createOperatingCalendarWindow({ ...input, userId: ctx.user.id });
+        } catch (error) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "Operating calendar could not be created." });
+        }
+      }),
+    setActive: protectedProcedure
+      .input(z.object({ organizationId: z.number().int().positive(), windowId: z.number().int().positive(), isActive: z.boolean() }))
+      .mutation(async ({ ctx, input }) => {
+        await requireOrganizationRole(ctx.user.id, input.organizationId, mutableRoles);
+        const result = await db.setOperatingCalendarWindowActive({ ...input, userId: ctx.user.id });
+        if (!result) throw new TRPCError({ code: "NOT_FOUND", message: "Operating calendar window not found in this organization." });
+        return result;
+      }),
+  }),
+
+  dataQualityRules: router({
+    list: protectedProcedure
+      .input(z.object({ organizationId: z.number().int().positive() }))
+      .query(async ({ ctx, input }) => {
+        await requireOrganizationRole(ctx.user.id, input.organizationId);
+        return db.listDataQualityRuleProfiles(input.organizationId);
+      }),
+    upsert: protectedProcedure
+      .input(z.object({ organizationId: z.number().int().positive(), resourceType: z.enum(resourceTypes), highValueCeiling: z.number().finite().positive().max(1_000_000_000), futureToleranceMinutes: z.number().int().min(0).max(1_440) }))
+      .mutation(async ({ ctx, input }) => {
+        await requireOrganizationRole(ctx.user.id, input.organizationId, mutableRoles);
+        return db.upsertDataQualityRuleProfile({ ...input, userId: ctx.user.id });
+      }),
+  }),
+
   analytics: router({
     overview: protectedProcedure
       .input(z.object({ organizationId: z.number().int().positive() }))
       .query(async ({ ctx, input }) => {
         await requireOrganizationRole(ctx.user.id, input.organizationId);
         return db.getMonitoringOverview(input.organizationId);
+      }),
+    meterFreshness: protectedProcedure
+      .input(z.object({ organizationId: z.number().int().positive() }))
+      .query(async ({ ctx, input }) => {
+        await requireOrganizationRole(ctx.user.id, input.organizationId);
+        return db.listMeterFreshness(input.organizationId);
+      }),
+    ecoScoreExplanation: protectedProcedure
+      .input(z.object({ organizationId: z.number().int().positive() }))
+      .query(async ({ ctx, input }) => {
+        await requireOrganizationRole(ctx.user.id, input.organizationId);
+        return db.getEcoScoreExplanation(input.organizationId);
       }),
     anomalies: protectedProcedure
       .input(z.object({ organizationId: z.number().int().positive() }))
@@ -679,6 +866,24 @@ export const appRouter = router({
           if (!collaboration.evidence.length) throw new TRPCError({ code: "BAD_REQUEST", message: "Add completion evidence before marking this action complete." });
         }
         const result = await db.updateSustainabilityActionStatus({ ...input, userId: ctx.user.id });
+        if (!result) throw new TRPCError({ code: "NOT_FOUND", message: "Action not found in this organization." });
+        return result;
+      }),
+    assign: protectedProcedure
+      .input(z.object({ organizationId: z.number().int().positive(), actionId: z.number().int().positive(), ownerUserId: z.number().int().positive() }))
+      .mutation(async ({ ctx, input }) => {
+        await requireOrganizationRole(ctx.user.id, input.organizationId, governanceRoles);
+        const isMember = (await db.listOrganizationMembers(input.organizationId)).some(({ user }) => user.id === input.ownerUserId);
+        if (!isMember) throw new TRPCError({ code: "NOT_FOUND", message: "Assignee is not a member of this organization." });
+        const result = await db.assignSustainabilityAction({ ...input, userId: ctx.user.id });
+        if (!result) throw new TRPCError({ code: "NOT_FOUND", message: "Action not found in this organization." });
+        return result;
+      }),
+    approve: protectedProcedure
+      .input(z.object({ organizationId: z.number().int().positive(), actionId: z.number().int().positive(), approvalNote: z.string().trim().min(3).max(2_000).optional() }))
+      .mutation(async ({ ctx, input }) => {
+        await requireOrganizationRole(ctx.user.id, input.organizationId, governanceRoles);
+        const result = await db.approveSustainabilityAction({ ...input, userId: ctx.user.id });
         if (!result) throw new TRPCError({ code: "NOT_FOUND", message: "Action not found in this organization." });
         return result;
       }),
@@ -870,6 +1075,23 @@ export const appRouter = router({
       }),
   }),
 
+  notifications: router({
+    inbox: protectedProcedure
+      .input(z.object({ organizationId: z.number().int().positive() }))
+      .query(async ({ ctx, input }) => {
+        await requireOrganizationRole(ctx.user.id, input.organizationId);
+        return db.getNotificationInbox({ organizationId: input.organizationId, userId: ctx.user.id });
+      }),
+    setReadState: protectedProcedure
+      .input(z.object({ organizationId: z.number().int().positive(), notificationKey: z.string().regex(/^(alert|import|action|monitoring|recovery):[a-zA-Z0-9:_-]+$/).max(160), read: z.boolean() }))
+      .mutation(async ({ ctx, input }) => {
+        await requireOrganizationRole(ctx.user.id, input.organizationId);
+        const inbox = await db.getNotificationInbox({ organizationId: input.organizationId, userId: ctx.user.id });
+        if (!inbox.items.some((item) => item.key === input.notificationKey)) throw new TRPCError({ code: "NOT_FOUND", message: "Notification is not currently available in this organization inbox." });
+        return db.setNotificationReadState({ organizationId: input.organizationId, userId: ctx.user.id, notificationKey: input.notificationKey, read: input.read });
+      }),
+  }),
+
   reports: router({
     summary: protectedProcedure
       .input(z.object({ organizationId: z.number().int().positive() }))
@@ -893,11 +1115,30 @@ export const appRouter = router({
   }),
 
   scenarios: router({
+    methodology: protectedProcedure
+      .input(z.object({ organizationId: z.number().int().positive() }))
+      .query(async ({ ctx, input }) => {
+        await requireOrganizationRole(ctx.user.id, input.organizationId);
+        return getScenarioMethodology();
+      }),
     preview: protectedProcedure
       .input(z.object({ organizationId: z.number().int().positive(), assumptions: scenarioAssumptionsSchema }))
       .mutation(async ({ ctx, input }) => {
         await requireOrganizationRole(ctx.user.id, input.organizationId);
+        await verifyScenarioBaselineReference(input.organizationId, input.assumptions);
         return { results: calculateScenario(input.assumptions), calculationVersion: SCENARIO_CALCULATION_VERSION };
+      }),
+    sensitivity: protectedProcedure
+      .input(z.object({ organizationId: z.number().int().positive(), assumptions: scenarioAssumptionsSchema, conservative: sensitivityCaseSchema, favorable: sensitivityCaseSchema }).superRefine((input, ctx) => {
+        if (input.conservative.performancePct > input.favorable.performancePct) ctx.addIssue({ code: "custom", path: ["conservative", "performancePct"], message: "Conservative performance must not exceed favorable performance." });
+        if (input.conservative.capexMultiplier < input.favorable.capexMultiplier) ctx.addIssue({ code: "custom", path: ["conservative", "capexMultiplier"], message: "Conservative capex must not be lower than favorable capex." });
+        if (input.conservative.tariffMultiplier > input.favorable.tariffMultiplier) ctx.addIssue({ code: "custom", path: ["conservative", "tariffMultiplier"], message: "Conservative tariff must not exceed favorable tariff." });
+        if (input.conservative.carbonFactorMultiplier > input.favorable.carbonFactorMultiplier) ctx.addIssue({ code: "custom", path: ["conservative", "carbonFactorMultiplier"], message: "Conservative carbon factor must not exceed favorable carbon factor." });
+      }))
+      .mutation(async ({ ctx, input }) => {
+        await requireOrganizationRole(ctx.user.id, input.organizationId);
+        await verifyScenarioBaselineReference(input.organizationId, input.assumptions);
+        return calculateScenarioSensitivity(input);
       }),
     save: protectedProcedure
       .input(z.object({
@@ -912,6 +1153,7 @@ export const appRouter = router({
           const site = (await db.listSites(input.organizationId)).find((item) => item.id === input.siteId);
           if (!site) throw new TRPCError({ code: "NOT_FOUND", message: "Site not found in this organization." });
         }
+        await verifyScenarioBaselineReference(input.organizationId, input.assumptions);
         const results = calculateScenario(input.assumptions);
         const scenario = await db.createSustainabilityScenario({ ...input, results, calculationVersion: SCENARIO_CALCULATION_VERSION, userId: ctx.user.id });
         return { scenario, results, calculationVersion: SCENARIO_CALCULATION_VERSION };
@@ -938,6 +1180,33 @@ export const appRouter = router({
         const result = await db.createInterventionComparison({ ...input, userId: ctx.user.id });
         if (!result) throw new TRPCError({ code: "NOT_FOUND", message: "At least two selected scenarios must belong to this organization." });
         return result;
+      }),
+    optimizePortfolio: protectedProcedure
+      .input(z.object({
+        organizationId: z.number().int().positive(),
+        scenarioIds: z.array(z.number().int().positive()).min(2).max(10).refine((ids) => new Set(ids).size === ids.length, "Scenario selection must not contain duplicates."),
+        budgetInr: z.number().finite().nonnegative().max(999_999_999),
+        maxInterventions: z.number().int().min(1).max(6),
+        objective: z.enum(["carbon_reduction", "annual_savings"]),
+      }))
+      .query(async ({ ctx, input }) => {
+        await requireOrganizationRole(ctx.user.id, input.organizationId);
+        const scenarios = await db.listSustainabilityScenarios(input.organizationId);
+        const selected = scenarios.filter((scenario) => input.scenarioIds.includes(scenario.id));
+        if (selected.length !== input.scenarioIds.length) throw new TRPCError({ code: "NOT_FOUND", message: "Every selected scenario must belong to this organization." });
+        return optimizeInterventionPortfolio({
+          budgetInr: input.budgetInr,
+          maxInterventions: input.maxInterventions,
+          objective: input.objective,
+          candidates: selected.map((scenario) => ({
+            scenarioId: scenario.id,
+            name: scenario.name,
+            investmentInr: scenario.assumptions.investmentInr,
+            carbonReductionKg: scenario.results.carbonReductionKg,
+            annualSavingsInr: scenario.results.annualSavingsInr,
+            paybackYears: scenario.results.paybackYears,
+          })),
+        });
       }),
   }),
 

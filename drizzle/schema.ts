@@ -44,6 +44,8 @@ export const reportSnapshotStatuses = ["generated", "archived"] as const;
 export const demoSimulationStatuses = ["running", "spike_injected", "reset"] as const;
 export const sustainabilityTargetTypes = ["energy", "water", "waste", "carbon", "ecoscore"] as const;
 export const sustainabilityTargetStatuses = ["active", "archived"] as const;
+export const operationalBaselineResourceTypes = ["energy", "water", "waste"] as const;
+export const outcomeMeasurementStatuses = ["comparable", "simulated_evidence"] as const;
 
 export type ScenarioAssumptions = {
   baselineEnergyKwh: number;
@@ -55,6 +57,16 @@ export type ScenarioAssumptions = {
   wasteReductionPct: number;
   recyclingPct: number;
   investmentInr: number;
+  baselineReference?: {
+    baselineId: number;
+    meterId: number;
+    resourceType: "energy" | "water" | "waste";
+    aggregateValue: number;
+    unit: string;
+    windowStart: string;
+    windowEnd: string;
+    includesSimulatedEvidence: boolean;
+  };
 };
 
 export type ScenarioResults = {
@@ -68,6 +80,15 @@ export type ScenarioResults = {
   roiPct: number | null;
   paybackYears: number | null;
   sdgImpact?: import("../server/domain/sdgImpact").SdgImpact;
+};
+
+export type OutcomeMeasurementResults = {
+  modeledProjectedValue: number;
+  modeledReductionValue: number;
+  observedReductionValue: number;
+  observedReductionPct: number | null;
+  varianceFromModeledValue: number;
+  disclosure: string;
 };
 
 export const users = mysqlTable("users", {
@@ -146,6 +167,32 @@ export const meters = mysqlTable(
   (table) => [
     uniqueIndex("meters_org_key_unique").on(table.organizationId, table.meterKey),
     index("meters_site_idx").on(table.siteId),
+  ],
+);
+
+/** Tenant-owned campus equipment inventory. Optional meter linkage is descriptive and does not assert live telemetry coverage. */
+export const campusEquipmentAssets = mysqlTable(
+  "campus_equipment_assets",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    organizationId: int("organizationId").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    siteId: int("siteId").notNull().references(() => sites.id, { onDelete: "cascade" }),
+    meterId: int("meterId").references(() => meters.id, { onDelete: "set null" }),
+    assetKey: varchar("assetKey", { length: 96 }).notNull(),
+    displayName: varchar("displayName", { length: 160 }).notNull(),
+    assetType: varchar("assetType", { length: 80 }).notNull(),
+    locationDescription: varchar("locationDescription", { length: 240 }),
+    lifecycleStatus: varchar("lifecycleStatus", { length: 32 }).notNull().default("active"),
+    notes: text("notes"),
+    createdByUserId: int("createdByUserId").notNull().references(() => users.id, { onDelete: "restrict" }),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("equipment_assets_org_key_unique").on(table.organizationId, table.assetKey),
+    index("equipment_assets_org_status_idx").on(table.organizationId, table.lifecycleStatus),
+    index("equipment_assets_site_idx").on(table.siteId),
+    index("equipment_assets_meter_idx").on(table.meterId),
   ],
 );
 
@@ -295,6 +342,71 @@ export const sustainabilityTargets = mysqlTable(
   ],
 );
 
+/** A saved, meter-specific accepted-reading aggregate used as traceable scenario context. */
+export const operationalBaselines = mysqlTable(
+  "operational_baselines",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    organizationId: int("organizationId").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    siteId: int("siteId").references(() => sites.id, { onDelete: "set null" }),
+    meterId: int("meterId").notNull().references(() => meters.id, { onDelete: "cascade" }),
+    label: varchar("label", { length: 160 }).notNull(),
+    resourceType: mysqlEnum("resourceType", operationalBaselineResourceTypes).notNull(),
+    unit: varchar("unit", { length: 24 }).notNull(),
+    aggregateValue: decimal("aggregateValue", { precision: 18, scale: 4 }).notNull(),
+    readingCount: int("readingCount").notNull(),
+    latestObservedAt: timestamp("latestObservedAt").notNull(),
+    includesSimulatedEvidence: boolean("includesSimulatedEvidence").notNull().default(false),
+    windowStart: timestamp("windowStart").notNull(),
+    windowEnd: timestamp("windowEnd").notNull(),
+    createdByUserId: int("createdByUserId").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+  },
+  (table) => [
+    index("baselines_org_created_idx").on(table.organizationId, table.createdAt),
+    index("baselines_org_meter_window_idx").on(table.organizationId, table.meterId, table.windowStart, table.windowEnd),
+    index("baselines_site_idx").on(table.siteId),
+  ],
+);
+
+/**
+ * A locked before/after comparison for a completed action. It records only
+ * comparable accepted-reading aggregates and their deterministic variance from
+ * a saved scenario model; it does not establish a realized savings claim.
+ */
+export const outcomeMeasurements = mysqlTable(
+  "outcome_measurements",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    organizationId: int("organizationId").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    actionId: int("actionId").notNull().references(() => sustainabilityActions.id, { onDelete: "cascade" }),
+    scenarioId: int("scenarioId").notNull().references(() => sustainabilityScenarios.id, { onDelete: "cascade" }),
+    baselineId: int("baselineId").notNull().references(() => operationalBaselines.id, { onDelete: "restrict" }),
+    meterId: int("meterId").notNull().references(() => meters.id, { onDelete: "restrict" }),
+    resourceType: mysqlEnum("resourceType", operationalBaselineResourceTypes).notNull(),
+    unit: varchar("unit", { length: 24 }).notNull(),
+    baselineValue: decimal("baselineValue", { precision: 18, scale: 4 }).notNull(),
+    baselineReadingCount: int("baselineReadingCount").notNull(),
+    baselineWindowStart: timestamp("baselineWindowStart").notNull(),
+    baselineWindowEnd: timestamp("baselineWindowEnd").notNull(),
+    outcomeValue: decimal("outcomeValue", { precision: 18, scale: 4 }).notNull(),
+    outcomeReadingCount: int("outcomeReadingCount").notNull(),
+    latestOutcomeObservedAt: timestamp("latestOutcomeObservedAt").notNull(),
+    outcomeWindowStart: timestamp("outcomeWindowStart").notNull(),
+    outcomeWindowEnd: timestamp("outcomeWindowEnd").notNull(),
+    includesSimulatedEvidence: boolean("includesSimulatedEvidence").notNull().default(false),
+    status: mysqlEnum("status", outcomeMeasurementStatuses).notNull(),
+    results: json("results").$type<OutcomeMeasurementResults>().notNull(),
+    createdByUserId: int("createdByUserId").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("outcome_measurements_action_unique").on(table.actionId),
+    index("outcome_measurements_org_created_idx").on(table.organizationId, table.createdAt),
+    index("outcome_measurements_org_meter_idx").on(table.organizationId, table.meterId),
+  ],
+);
+
 /** Source file and deterministic parse/validation lifecycle for a controlled CSV import. */
 export const dataImportFiles = mysqlTable(
   "data_import_files",
@@ -436,6 +548,9 @@ export const sustainabilityActions = mysqlTable(
     ownerUserId: int("ownerUserId").references(() => users.id, { onDelete: "set null" }),
     expectedCarbonReductionKg: decimal("expectedCarbonReductionKg", { precision: 16, scale: 4 }),
     targetDate: timestamp("targetDate"),
+    approvedByUserId: int("approvedByUserId").references(() => users.id, { onDelete: "set null" }),
+    approvedAt: timestamp("approvedAt"),
+    approvalNote: text("approvalNote"),
     completedAt: timestamp("completedAt"),
     createdAt: timestamp("createdAt").defaultNow().notNull(),
     updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
@@ -445,6 +560,24 @@ export const sustainabilityActions = mysqlTable(
     index("sustainability_actions_site_idx").on(table.siteId),
     index("sustainability_actions_scenario_idx").on(table.scenarioId),
     index("sustainability_actions_comparison_idx").on(table.comparisonId),
+  ],
+);
+
+/** Per-user read state for notifications deterministically derived from existing tenant evidence. */
+export const userNotificationStates = mysqlTable(
+  "user_notification_states",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    organizationId: int("organizationId").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    userId: int("userId").notNull().references(() => users.id, { onDelete: "cascade" }),
+    notificationKey: varchar("notificationKey", { length: 160 }).notNull(),
+    readAt: timestamp("readAt"),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("notification_states_org_user_key_unique").on(table.organizationId, table.userId, table.notificationKey),
+    index("notification_states_user_updated_idx").on(table.userId, table.updatedAt),
   ],
 );
 
@@ -492,6 +625,22 @@ export const dataQualityFindings = mysqlTable(
   ],
 );
 
+/** Versioned prospective validation policy. Existing findings remain historical evidence under their recorded rule context. */
+export const dataQualityRuleProfiles = mysqlTable(
+  "data_quality_rule_profiles",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    organizationId: int("organizationId").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    resourceType: mysqlEnum("resourceType", resourceTypes).notNull(),
+    highValueCeiling: decimal("highValueCeiling", { precision: 16, scale: 4 }).notNull(),
+    futureToleranceMinutes: int("futureToleranceMinutes").notNull().default(5),
+    version: int("version").notNull().default(1),
+    updatedByUserId: int("updatedByUserId").notNull().references(() => users.id, { onDelete: "restrict" }),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  (table) => [uniqueIndex("data_quality_rules_org_resource_unique").on(table.organizationId, table.resourceType), index("data_quality_rules_org_updated_idx").on(table.organizationId, table.updatedAt)],
+);
+
 /** Carbon output derived from a source reading and a versioned pilot factor. */
 export const carbonCalculations = mysqlTable(
   "carbon_calculations",
@@ -530,6 +679,7 @@ export const anomalyEvents = mysqlTable(
     observedValue: decimal("observedValue", { precision: 16, scale: 4 }).notNull(),
     zScore: decimal("zScore", { precision: 12, scale: 4 }).notNull(),
     evidence: json("evidence"),
+    alertSuppressedByMaintenanceWindowId: int("alertSuppressedByMaintenanceWindowId"),
     detectedAt: timestamp("detectedAt").defaultNow().notNull(),
     acknowledgedAt: timestamp("acknowledgedAt"),
     resolvedAt: timestamp("resolvedAt"),
@@ -539,6 +689,44 @@ export const anomalyEvents = mysqlTable(
     index("anomaly_events_org_status_idx").on(table.organizationId, table.status),
     index("anomaly_events_meter_detected_idx").on(table.meterId, table.detectedAt),
   ],
+);
+
+/** Time-bounded planned work for a single meter. It suppresses matching alert creation but never removes source or anomaly evidence. */
+export const maintenanceWindows = mysqlTable(
+  "maintenance_windows",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    organizationId: int("organizationId").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    meterId: int("meterId").notNull().references(() => meters.id, { onDelete: "cascade" }),
+    label: varchar("label", { length: 160 }).notNull(),
+    reason: text("reason").notNull(),
+    windowStart: timestamp("windowStart").notNull(),
+    windowEnd: timestamp("windowEnd").notNull(),
+    cancelledAt: timestamp("cancelledAt"),
+    createdByUserId: int("createdByUserId").notNull().references(() => users.id, { onDelete: "restrict" }),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+  },
+  (table) => [index("maintenance_windows_org_meter_time_idx").on(table.organizationId, table.meterId, table.windowStart, table.windowEnd)],
+);
+
+/** Explicit local operating intervals used only to partition anomaly baselines; they never suppress source, quality, carbon, or score evidence. */
+export const operatingCalendarWindows = mysqlTable(
+  "operating_calendar_windows",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    organizationId: int("organizationId").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    meterId: int("meterId").notNull().references(() => meters.id, { onDelete: "cascade" }),
+    label: varchar("label", { length: 160 }).notNull(),
+    timezone: varchar("timezone", { length: 64 }).notNull(),
+    weekdays: json("weekdays").$type<number[]>().notNull(),
+    startMinuteLocal: int("startMinuteLocal").notNull(),
+    endMinuteLocal: int("endMinuteLocal").notNull(),
+    isActive: boolean("isActive").notNull().default(true),
+    createdByUserId: int("createdByUserId").notNull().references(() => users.id, { onDelete: "restrict" }),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  (table) => [index("operating_calendar_org_meter_active_idx").on(table.organizationId, table.meterId, table.isActive)],
 );
 
 /** Actionable alert generated from a persisted anomaly event. */
@@ -866,6 +1054,7 @@ export type DataImportFile = typeof dataImportFiles.$inferSelect;
 export type DataImportRow = typeof dataImportRows.$inferSelect;
 export type ReadingCorrection = typeof readingCorrections.$inferSelect;
 export type EmissionFactor = typeof emissionFactors.$inferSelect;
+export type OperationalBaseline = typeof operationalBaselines.$inferSelect;
 export type SustainabilityForecast = typeof sustainabilityForecasts.$inferSelect;
 export type SustainabilityRecommendation = typeof sustainabilityRecommendations.$inferSelect;
 export type SustainabilityActionComment = typeof sustainabilityActionComments.$inferSelect;

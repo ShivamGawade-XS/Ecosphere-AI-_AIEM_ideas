@@ -37,6 +37,17 @@ describe("DashboardLayout operational index", () => {
     expect(document.getElementById("workspace-content")?.getAttribute("tabindex")).toBe("-1");
   });
 
+  it("opens a searchable workspace navigator with Ctrl+K and hands off to the selected route", async () => {
+    render(<DashboardLayout><div>Workspace body</div></DashboardLayout>);
+    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+    expect(screen.getByRole("dialog")).toBeTruthy();
+    const search = screen.getByRole("textbox", { name: "Search workspaces" });
+    fireEvent.change(search, { target: { value: "inbox" } });
+    expect(screen.getByRole("button", { name: /Inbox/i })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /Inbox/i }));
+    await waitFor(() => expect(window.location.pathname).toBe("/app/notifications"));
+  });
+
   it("explains the protected workspace and preserves a public-narrative escape route when signed out", () => {
     auth.state = { loading: false, user: null, logout: vi.fn() };
     render(<DashboardLayout><div>Protected content</div></DashboardLayout>);

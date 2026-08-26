@@ -11,9 +11,11 @@ import {
   alertRoutingPreferences,
   anomalyEvents,
   carbonCalculations,
+  campusEquipmentAssets,
   dataImportFiles,
   dataImportRows,
   dataQualityFindings,
+  dataQualityRuleProfiles,
   demoSimulationSessions,
   ecoScoreSnapshots,
   emissionFactors,
@@ -25,6 +27,10 @@ import {
   monitoringRecoveryEvents,
   monitoringRuns,
   monitoringServiceTargets,
+  maintenanceWindows,
+  operatingCalendarWindows,
+  outcomeMeasurements,
+  operationalBaselines,
   organizationMemberships,
   organizations,
   readingCorrections,
@@ -39,6 +45,7 @@ import {
   sustainabilityReportSnapshots,
   sustainabilityScenarios,
   sustainabilityTargets,
+  userNotificationStates,
   type ScenarioAssumptions,
   type ScenarioResults,
   type InsertUser,
@@ -53,6 +60,11 @@ import { INTERVENTION_COMPARISON_VERSION, rankScenarioInterventions } from "./do
 import { materializeReportSnapshot } from "./domain/reportSnapshots";
 import { assessTarget, targetDirectionForType } from "./domain/targetAssessment";
 import { orderEvidenceTimeline } from "./domain/evidenceTimeline";
+import { compareOutcomeMeasurement } from "./domain/outcomeMeasurement";
+import { assessMeterFreshness } from "./domain/meterFreshness";
+import { explainPersistedEcoScore } from "./domain/ecoScoreExplanation";
+import { buildInboxNotifications } from "./domain/notificationInbox";
+import { assertValidTimeZone } from "./domain/operatingCalendar";
 
 let databasePool: ReturnType<typeof createPool> | null = null;
 
@@ -100,6 +112,10 @@ function safeSlug(value: string) {
     .replace(/^-+|-+$/g, "")
     .slice(0, 80);
   return `${normalized || "organization"}-${nanoid(6).toLowerCase()}`;
+}
+
+function isOperationalBaselineResourceType(value: string): value is "energy" | "water" | "waste" {
+  return value === "energy" || value === "water" || value === "waste";
 }
 
 export async function upsertUser(user: InsertUser): Promise<void> {
@@ -299,6 +315,67 @@ export async function listMeters(organizationId: number, siteId?: number) {
     ? and(eq(meters.organizationId, organizationId), eq(meters.siteId, siteId))
     : eq(meters.organizationId, organizationId);
   return database.select().from(meters).where(predicate).orderBy(meters.displayName);
+}
+
+export async function createCampusEquipmentAsset(input: { organizationId: number; siteId: number; meterId?: number; assetKey: string; displayName: string; assetType: string; locationDescription?: string; notes?: string; userId: number }) {
+  const database = await requireDb();
+  return database.transaction(async (tx) => {
+    const [site] = await tx.select({ id: sites.id }).from(sites).where(and(eq(sites.id, input.siteId), eq(sites.organizationId, input.organizationId))).limit(1);
+    if (!site) throw new Error("Site not found in this organization.");
+    if (input.meterId) {
+      const [meter] = await tx.select({ id: meters.id }).from(meters).where(and(eq(meters.id, input.meterId), eq(meters.organizationId, input.organizationId), eq(meters.siteId, input.siteId))).limit(1);
+      if (!meter) throw new Error("Linked meter must belong to the selected tenant site.");
+    }
+    const [created] = await tx.insert(campusEquipmentAssets).values({ organizationId: input.organizationId, siteId: input.siteId, meterId: input.meterId ?? null, assetKey: input.assetKey, displayName: input.displayName, assetType: input.assetType, locationDescription: input.locationDescription ?? null, notes: input.notes ?? null, createdByUserId: input.userId }).$returningId();
+    await tx.insert(auditEvents).values({ organizationId: input.organizationId, actorUserId: input.userId, eventType: "equipment_asset.created", resourceType: "campus_equipment_asset", resourceId: String(created.id), payload: { siteId: input.siteId, meterId: input.meterId ?? null, assetKey: input.assetKey, assetType: input.assetType, lifecycleStatus: "active" } });
+    return created;
+  });
+}
+
+export async function listCampusEquipmentAssets(organizationId: number) {
+  const database = await requireDb();
+  return database.select({ asset: campusEquipmentAssets, site: { id: sites.id, name: sites.name, code: sites.code }, meter: { id: meters.id, displayName: meters.displayName, resourceType: meters.resourceType, canonicalUnit: meters.canonicalUnit } }).from(campusEquipmentAssets).innerJoin(sites, eq(campusEquipmentAssets.siteId, sites.id)).leftJoin(meters, eq(campusEquipmentAssets.meterId, meters.id)).where(eq(campusEquipmentAssets.organizationId, organizationId)).orderBy(desc(campusEquipmentAssets.updatedAt)).limit(200);
+}
+
+export async function updateCampusEquipmentAssetStatus(input: { organizationId: number; assetId: number; lifecycleStatus: "active" | "maintenance" | "retired"; userId: number }) {
+  const database = await requireDb();
+  const [asset] = await database.select({ id: campusEquipmentAssets.id, lifecycleStatus: campusEquipmentAssets.lifecycleStatus }).from(campusEquipmentAssets).where(and(eq(campusEquipmentAssets.id, input.assetId), eq(campusEquipmentAssets.organizationId, input.organizationId))).limit(1);
+  if (!asset) return undefined;
+  await database.transaction(async (tx) => {
+    await tx.update(campusEquipmentAssets).set({ lifecycleStatus: input.lifecycleStatus }).where(eq(campusEquipmentAssets.id, input.assetId));
+    await tx.insert(auditEvents).values({ organizationId: input.organizationId, actorUserId: input.userId, eventType: "equipment_asset.lifecycle_updated", resourceType: "campus_equipment_asset", resourceId: String(input.assetId), payload: { previousLifecycleStatus: asset.lifecycleStatus, nextLifecycleStatus: input.lifecycleStatus } });
+  });
+  return { id: input.assetId, lifecycleStatus: input.lifecycleStatus };
+}
+
+export async function listMeterFreshness(organizationId: number, now = new Date()) {
+  const database = await requireDb();
+  const activeMeters = await database.select().from(meters).where(and(eq(meters.organizationId, organizationId), eq(meters.isActive, true))).orderBy(meters.displayName);
+  return Promise.all(activeMeters.map(async (meter) => {
+    const [latest] = await database.select({ observedAt: max(sustainabilityReadings.observedAt) })
+      .from(sustainabilityReadings)
+      .where(and(
+        eq(sustainabilityReadings.organizationId, organizationId),
+        eq(sustainabilityReadings.meterId, meter.id),
+        eq(sustainabilityReadings.qualityStatus, "accepted"),
+        isNull(sustainabilityReadings.supersededAt),
+      ));
+    const latestAcceptedObservedAt = latest?.observedAt ?? null;
+    return { meter, latestAcceptedObservedAt, freshness: assessMeterFreshness(latestAcceptedObservedAt, now) };
+  }));
+}
+
+export async function listDataQualityRuleProfiles(organizationId: number) {
+  const database = await requireDb();
+  return database.select().from(dataQualityRuleProfiles).where(eq(dataQualityRuleProfiles.organizationId, organizationId)).orderBy(dataQualityRuleProfiles.resourceType);
+}
+
+export async function upsertDataQualityRuleProfile(input: { organizationId: number; resourceType: "energy" | "water" | "waste" | "fuel" | "renewable"; highValueCeiling: number; futureToleranceMinutes: number; userId: number }) {
+  const database = await requireDb();
+  await database.insert(dataQualityRuleProfiles).values({ organizationId: input.organizationId, resourceType: input.resourceType, highValueCeiling: input.highValueCeiling.toFixed(4), futureToleranceMinutes: input.futureToleranceMinutes, version: 1, updatedByUserId: input.userId }).onDuplicateKeyUpdate({ set: { highValueCeiling: input.highValueCeiling.toFixed(4), futureToleranceMinutes: input.futureToleranceMinutes, version: sql`${dataQualityRuleProfiles.version} + 1`, updatedByUserId: input.userId, updatedAt: new Date() } });
+  const [profile] = await database.select().from(dataQualityRuleProfiles).where(and(eq(dataQualityRuleProfiles.organizationId, input.organizationId), eq(dataQualityRuleProfiles.resourceType, input.resourceType))).limit(1);
+  await database.insert(auditEvents).values({ organizationId: input.organizationId, actorUserId: input.userId, eventType: "data_quality_rule.updated", resourceType: "data_quality_rule_profile", resourceId: String(profile?.id ?? input.resourceType), payload: { resourceType: input.resourceType, highValueCeiling: input.highValueCeiling, futureToleranceMinutes: input.futureToleranceMinutes, version: profile?.version ?? null } });
+  return profile!;
 }
 
 export async function getActiveDemoSimulationSession(organizationId: number) {
@@ -538,6 +615,181 @@ export async function assessSustainabilityTargets(organizationId: number, now = 
     const assessment = assessTarget({ targetValue: Number(target.targetValue), achievedValue, direction, latestObservedAt, now });
     return { target, direction, achievedValue, latestObservedAt, assessment };
   }));
+}
+
+export async function createOperationalBaseline(input: {
+  organizationId: number;
+  meterId: number;
+  label: string;
+  windowStart: Date;
+  windowEnd: Date;
+  userId: number;
+}) {
+  const database = await requireDb();
+  if (input.windowEnd.getTime() <= input.windowStart.getTime()) throw new Error("Baseline window end must follow its start.");
+  return database.transaction(async (tx) => {
+    const [meter] = await tx.select().from(meters).where(and(eq(meters.organizationId, input.organizationId), eq(meters.id, input.meterId), eq(meters.isActive, true))).limit(1);
+    if (!meter || !isOperationalBaselineResourceType(meter.resourceType)) throw new Error("Select an active energy, water, or waste meter in this organization.");
+    const readings = await tx.select({ value: sustainabilityReadings.value, observedAt: sustainabilityReadings.observedAt, source: sustainabilityReadings.source })
+      .from(sustainabilityReadings)
+      .where(and(
+        eq(sustainabilityReadings.organizationId, input.organizationId),
+        eq(sustainabilityReadings.meterId, input.meterId),
+        isNull(sustainabilityReadings.supersededAt),
+        eq(sustainabilityReadings.qualityStatus, "accepted"),
+        gte(sustainabilityReadings.observedAt, input.windowStart),
+        lte(sustainabilityReadings.observedAt, input.windowEnd),
+      ));
+    if (!readings.length) throw new Error("No accepted readings exist for this meter in the selected UTC window.");
+    const aggregateValue = readings.reduce((total, reading) => total + Number(reading.value), 0);
+    const latestObservedAt = readings.reduce((latest, reading) => reading.observedAt > latest ? reading.observedAt : latest, readings[0].observedAt);
+    const includesSimulatedEvidence = readings.some((reading) => reading.source === "simulated");
+    const [created] = await tx.insert(operationalBaselines).values({
+      organizationId: input.organizationId,
+      siteId: meter.siteId,
+      meterId: meter.id,
+      label: input.label,
+      resourceType: meter.resourceType,
+      unit: meter.canonicalUnit,
+      aggregateValue: aggregateValue.toFixed(4),
+      readingCount: readings.length,
+      latestObservedAt,
+      includesSimulatedEvidence,
+      windowStart: input.windowStart,
+      windowEnd: input.windowEnd,
+      createdByUserId: input.userId,
+    }).$returningId();
+    await tx.insert(auditEvents).values({
+      organizationId: input.organizationId,
+      actorUserId: input.userId,
+      eventType: "operational_baseline.created",
+      resourceType: "operational_baseline",
+      resourceId: String(created.id),
+      payload: { meterId: meter.id, resourceType: meter.resourceType, aggregateValue, unit: meter.canonicalUnit, readingCount: readings.length, windowStart: input.windowStart.toISOString(), windowEnd: input.windowEnd.toISOString(), includesSimulatedEvidence },
+    });
+    const [baseline] = await tx.select().from(operationalBaselines).where(eq(operationalBaselines.id, created.id)).limit(1);
+    return { baseline, meter };
+  });
+}
+
+export async function listOperationalBaselines(organizationId: number) {
+  const database = await requireDb();
+  return database.select({ baseline: operationalBaselines, meter: { id: meters.id, displayName: meters.displayName, resourceType: meters.resourceType, canonicalUnit: meters.canonicalUnit } })
+    .from(operationalBaselines)
+    .innerJoin(meters, eq(operationalBaselines.meterId, meters.id))
+    .where(eq(operationalBaselines.organizationId, organizationId))
+    .orderBy(desc(operationalBaselines.createdAt))
+    .limit(100);
+}
+
+export async function getOperationalBaseline(organizationId: number, baselineId: number) {
+  const database = await requireDb();
+  const [result] = await database.select({ baseline: operationalBaselines, meter: { id: meters.id, displayName: meters.displayName, resourceType: meters.resourceType, canonicalUnit: meters.canonicalUnit } })
+    .from(operationalBaselines)
+    .innerJoin(meters, eq(operationalBaselines.meterId, meters.id))
+    .where(and(eq(operationalBaselines.organizationId, organizationId), eq(operationalBaselines.id, baselineId)))
+    .limit(1);
+  return result;
+}
+
+export async function createOutcomeMeasurement(input: {
+  organizationId: number;
+  actionId: number;
+  baselineId: number;
+  outcomeWindowStart: Date;
+  outcomeWindowEnd: Date;
+  userId: number;
+}) {
+  const database = await requireDb();
+  if (input.outcomeWindowEnd.getTime() <= input.outcomeWindowStart.getTime()) throw new Error("Outcome window end must follow its start.");
+  return database.transaction(async (tx) => {
+    const [action] = await tx.select().from(sustainabilityActions).where(and(eq(sustainabilityActions.organizationId, input.organizationId), eq(sustainabilityActions.id, input.actionId))).limit(1);
+    if (!action) throw new Error("Action not found in this organization.");
+    if (action.status !== "completed") throw new Error("Complete the action before recording an outcome measurement.");
+    if (!action.scenarioId) throw new Error("Outcome measurement requires an action linked to a saved scenario.");
+
+    const [scenario] = await tx.select().from(sustainabilityScenarios).where(and(eq(sustainabilityScenarios.organizationId, input.organizationId), eq(sustainabilityScenarios.id, action.scenarioId))).limit(1);
+    if (!scenario) throw new Error("Saved action scenario is not available in this organization.");
+    const [baseline] = await tx.select().from(operationalBaselines).where(and(eq(operationalBaselines.organizationId, input.organizationId), eq(operationalBaselines.id, input.baselineId))).limit(1);
+    if (!baseline) throw new Error("Saved operational baseline not found in this organization.");
+
+    const reference = scenario.assumptions.baselineReference;
+    if (!reference || reference.baselineId !== baseline.id || reference.meterId !== baseline.meterId || reference.resourceType !== baseline.resourceType || Number(reference.aggregateValue) !== Number(baseline.aggregateValue) || reference.unit !== baseline.unit || reference.windowStart !== baseline.windowStart.toISOString() || reference.windowEnd !== baseline.windowEnd.toISOString() || reference.includesSimulatedEvidence !== baseline.includesSimulatedEvidence) {
+      throw new Error("The saved scenario does not retain an exact reference to this operational baseline.");
+    }
+
+    const baselineWindowDurationMs = baseline.windowEnd.getTime() - baseline.windowStart.getTime();
+    const outcomeWindowDurationMs = input.outcomeWindowEnd.getTime() - input.outcomeWindowStart.getTime();
+    if (baselineWindowDurationMs !== outcomeWindowDurationMs) throw new Error("Outcome window must match the saved baseline duration exactly; EcoSphere does not silently normalize evidence windows.");
+
+    const readings = await tx.select({ value: sustainabilityReadings.value, observedAt: sustainabilityReadings.observedAt, source: sustainabilityReadings.source })
+      .from(sustainabilityReadings)
+      .where(and(
+        eq(sustainabilityReadings.organizationId, input.organizationId),
+        eq(sustainabilityReadings.meterId, baseline.meterId),
+        isNull(sustainabilityReadings.supersededAt),
+        eq(sustainabilityReadings.qualityStatus, "accepted"),
+        gte(sustainabilityReadings.observedAt, input.outcomeWindowStart),
+        lte(sustainabilityReadings.observedAt, input.outcomeWindowEnd),
+      ));
+    if (!readings.length) throw new Error("No accepted readings exist for this meter in the selected outcome UTC window.");
+
+    const outcomeValue = readings.reduce((total, reading) => total + Number(reading.value), 0);
+    const latestOutcomeObservedAt = readings.reduce((latest, reading) => reading.observedAt > latest ? reading.observedAt : latest, readings[0].observedAt);
+    const includesSimulatedEvidence = Boolean(baseline.includesSimulatedEvidence) || readings.some((reading) => reading.source === "simulated");
+    const modeledProjectedValue = baseline.resourceType === "energy"
+      ? scenario.results.projectedEnergyKwh
+      : baseline.resourceType === "water"
+        ? scenario.results.projectedWaterM3
+        : scenario.results.projectedWasteKg;
+    const comparison = compareOutcomeMeasurement({ baselineValue: Number(baseline.aggregateValue), outcomeValue, modeledProjectedValue, includesSimulatedEvidence });
+
+    const [existing] = await tx.select({ id: outcomeMeasurements.id }).from(outcomeMeasurements).where(eq(outcomeMeasurements.actionId, action.id)).limit(1);
+    if (existing) throw new Error("An outcome measurement already exists for this action and is intentionally locked.");
+    const [created] = await tx.insert(outcomeMeasurements).values({
+      organizationId: input.organizationId,
+      actionId: action.id,
+      scenarioId: scenario.id,
+      baselineId: baseline.id,
+      meterId: baseline.meterId,
+      resourceType: baseline.resourceType,
+      unit: baseline.unit,
+      baselineValue: Number(baseline.aggregateValue).toFixed(4),
+      baselineReadingCount: baseline.readingCount,
+      baselineWindowStart: baseline.windowStart,
+      baselineWindowEnd: baseline.windowEnd,
+      outcomeValue: outcomeValue.toFixed(4),
+      outcomeReadingCount: readings.length,
+      latestOutcomeObservedAt,
+      outcomeWindowStart: input.outcomeWindowStart,
+      outcomeWindowEnd: input.outcomeWindowEnd,
+      includesSimulatedEvidence,
+      status: comparison.status,
+      results: comparison.results,
+      createdByUserId: input.userId,
+    }).$returningId();
+    await tx.insert(auditEvents).values({
+      organizationId: input.organizationId,
+      actorUserId: input.userId,
+      eventType: "outcome_measurement.created",
+      resourceType: "outcome_measurement",
+      resourceId: String(created.id),
+      payload: { actionId: action.id, scenarioId: scenario.id, baselineId: baseline.id, meterId: baseline.meterId, outcomeWindowStart: input.outcomeWindowStart.toISOString(), outcomeWindowEnd: input.outcomeWindowEnd.toISOString(), outcomeReadingCount: readings.length, includesSimulatedEvidence, status: comparison.status },
+    });
+    const [measurement] = await tx.select().from(outcomeMeasurements).where(eq(outcomeMeasurements.id, created.id)).limit(1);
+    return measurement;
+  });
+}
+
+export async function listOutcomeMeasurements(organizationId: number) {
+  const database = await requireDb();
+  return database.select({ measurement: outcomeMeasurements, action: { id: sustainabilityActions.id, title: sustainabilityActions.title, status: sustainabilityActions.status }, meter: { id: meters.id, displayName: meters.displayName } })
+    .from(outcomeMeasurements)
+    .innerJoin(sustainabilityActions, eq(outcomeMeasurements.actionId, sustainabilityActions.id))
+    .innerJoin(meters, eq(outcomeMeasurements.meterId, meters.id))
+    .where(eq(outcomeMeasurements.organizationId, organizationId))
+    .orderBy(desc(outcomeMeasurements.createdAt))
+    .limit(100);
 }
 
 export async function getMeterById(organizationId: number, meterId: number) {
@@ -1222,6 +1474,64 @@ export async function createAnomalyIfAbsent(input: {
   return { created: true, anomalyId: created.id };
 }
 
+export async function createMaintenanceWindow(input: { organizationId: number; meterId: number; label: string; reason: string; windowStart: Date; windowEnd: Date; userId: number }) {
+  if (input.windowEnd <= input.windowStart) throw new Error("Maintenance window end must be after its start.");
+  const database = await requireDb();
+  const [meter] = await database.select({ id: meters.id }).from(meters).where(and(eq(meters.id, input.meterId), eq(meters.organizationId, input.organizationId))).limit(1);
+  if (!meter) throw new Error("Meter not found in this organization.");
+  const [created] = await database.insert(maintenanceWindows).values({ organizationId: input.organizationId, meterId: input.meterId, label: input.label, reason: input.reason, windowStart: input.windowStart, windowEnd: input.windowEnd, createdByUserId: input.userId }).$returningId();
+  await database.insert(auditEvents).values({ organizationId: input.organizationId, actorUserId: input.userId, eventType: "maintenance_window.created", resourceType: "maintenance_window", resourceId: String(created.id), payload: { meterId: input.meterId, windowStart: input.windowStart.toISOString(), windowEnd: input.windowEnd.toISOString() } });
+  return created;
+}
+
+export async function listMaintenanceWindows(organizationId: number) {
+  const database = await requireDb();
+  return database.select({ window: maintenanceWindows, meter: { id: meters.id, displayName: meters.displayName, resourceType: meters.resourceType, canonicalUnit: meters.canonicalUnit } }).from(maintenanceWindows).innerJoin(meters, eq(maintenanceWindows.meterId, meters.id)).where(eq(maintenanceWindows.organizationId, organizationId)).orderBy(desc(maintenanceWindows.windowStart)).limit(50);
+}
+
+export async function createOperatingCalendarWindow(input: { organizationId: number; meterId: number; label: string; timezone: string; weekdays: number[]; startMinuteLocal: number; endMinuteLocal: number; userId: number }) {
+  if (!input.weekdays.length || input.weekdays.some((day) => !Number.isInteger(day) || day < 0 || day > 6) || new Set(input.weekdays).size !== input.weekdays.length) throw new Error("Operating weekdays must be distinct values from 0 (Sunday) through 6 (Saturday).");
+  if (input.startMinuteLocal < 0 || input.endMinuteLocal > 1440 || input.endMinuteLocal <= input.startMinuteLocal) throw new Error("Operating-window end must be after start within the same local day.");
+  assertValidTimeZone(input.timezone);
+  const database = await requireDb();
+  const [meter] = await database.select({ id: meters.id }).from(meters).where(and(eq(meters.id, input.meterId), eq(meters.organizationId, input.organizationId))).limit(1);
+  if (!meter) throw new Error("Meter not found in this organization.");
+  const [created] = await database.insert(operatingCalendarWindows).values({ organizationId: input.organizationId, meterId: input.meterId, label: input.label, timezone: input.timezone, weekdays: input.weekdays, startMinuteLocal: input.startMinuteLocal, endMinuteLocal: input.endMinuteLocal, createdByUserId: input.userId }).$returningId();
+  await database.insert(auditEvents).values({ organizationId: input.organizationId, actorUserId: input.userId, eventType: "operating_calendar.created", resourceType: "operating_calendar_window", resourceId: String(created.id), payload: { meterId: input.meterId, timezone: input.timezone, weekdays: input.weekdays, startMinuteLocal: input.startMinuteLocal, endMinuteLocal: input.endMinuteLocal } });
+  return created;
+}
+
+export async function listOperatingCalendarWindows(organizationId: number) {
+  const database = await requireDb();
+  return database.select({ window: operatingCalendarWindows, meter: { id: meters.id, displayName: meters.displayName, resourceType: meters.resourceType, canonicalUnit: meters.canonicalUnit } }).from(operatingCalendarWindows).innerJoin(meters, eq(operatingCalendarWindows.meterId, meters.id)).where(eq(operatingCalendarWindows.organizationId, organizationId)).orderBy(desc(operatingCalendarWindows.updatedAt)).limit(100);
+}
+
+export async function listActiveOperatingCalendarWindows(organizationId: number) {
+  const database = await requireDb();
+  return database.select().from(operatingCalendarWindows).where(and(eq(operatingCalendarWindows.organizationId, organizationId), eq(operatingCalendarWindows.isActive, true))).limit(200);
+}
+
+export async function setOperatingCalendarWindowActive(input: { organizationId: number; windowId: number; isActive: boolean; userId: number }) {
+  const database = await requireDb();
+  const [window] = await database.select({ id: operatingCalendarWindows.id }).from(operatingCalendarWindows).where(and(eq(operatingCalendarWindows.organizationId, input.organizationId), eq(operatingCalendarWindows.id, input.windowId))).limit(1);
+  if (!window) return undefined;
+  await database.update(operatingCalendarWindows).set({ isActive: input.isActive }).where(eq(operatingCalendarWindows.id, input.windowId));
+  await database.insert(auditEvents).values({ organizationId: input.organizationId, actorUserId: input.userId, eventType: input.isActive ? "operating_calendar.activated" : "operating_calendar.deactivated", resourceType: "operating_calendar_window", resourceId: String(input.windowId), payload: { isActive: input.isActive } });
+  return { id: input.windowId, isActive: input.isActive };
+}
+
+export async function getActiveMaintenanceWindow(organizationId: number, meterId: number, occurredAt: Date) {
+  const database = await requireDb();
+  const [window] = await database.select().from(maintenanceWindows).where(and(eq(maintenanceWindows.organizationId, organizationId), eq(maintenanceWindows.meterId, meterId), lte(maintenanceWindows.windowStart, occurredAt), gte(maintenanceWindows.windowEnd, occurredAt), isNull(maintenanceWindows.cancelledAt))).orderBy(desc(maintenanceWindows.createdAt)).limit(1);
+  return window ?? null;
+}
+
+export async function markAnomalyAlertSuppressed(input: { organizationId: number; anomalyId: number; maintenanceWindowId: number }) {
+  const database = await requireDb();
+  await database.update(anomalyEvents).set({ alertSuppressedByMaintenanceWindowId: input.maintenanceWindowId }).where(and(eq(anomalyEvents.organizationId, input.organizationId), eq(anomalyEvents.id, input.anomalyId)));
+  await database.insert(auditEvents).values({ organizationId: input.organizationId, eventType: "alert.suppressed_by_maintenance", resourceType: "anomaly_event", resourceId: String(input.anomalyId), payload: { maintenanceWindowId: input.maintenanceWindowId } });
+}
+
 export async function createMonitoringAlertIfAbsent(input: {
   organizationId: number;
   anomalyId: number;
@@ -1319,6 +1629,12 @@ export async function getMonitoringStatus(organizationId: number) {
     database.select({ value: count() }).from(monitoringAlerts).where(and(eq(monitoringAlerts.organizationId, organizationId), eq(monitoringAlerts.status, "open"))),
   ]);
   return { latestRun: latestRun[0] ?? null, latestScore: latestScore[0] ?? null, openAlertCount: Number(openAlerts[0]?.value ?? 0) };
+}
+
+export async function getEcoScoreExplanation(organizationId: number) {
+  const database = await requireDb();
+  const [snapshot] = await database.select().from(ecoScoreSnapshots).where(eq(ecoScoreSnapshots.organizationId, organizationId)).orderBy(desc(ecoScoreSnapshots.computedAt)).limit(1);
+  return snapshot ? explainPersistedEcoScore(snapshot) : null;
 }
 
 export async function upsertMonitoringServiceTarget(input: {
@@ -1736,7 +2052,7 @@ export async function createSustainabilityAction(input: {
       eventType: "action.created",
       resourceType: "sustainability_action",
       resourceId: String(created.id),
-      payload: { priority: input.priority, siteId: input.siteId ?? null, scenarioId: input.scenarioId ?? null, comparisonId: input.comparisonId ?? null },
+      payload: { priority: input.priority, siteId: input.siteId ?? null, scenarioId: input.scenarioId ?? null, comparisonId: input.comparisonId ?? null, targetDate: input.targetDate?.toISOString() ?? null },
     });
     return created;
   });
@@ -1750,6 +2066,35 @@ export async function listSustainabilityActions(organizationId: number) {
     .where(eq(sustainabilityActions.organizationId, organizationId))
     .orderBy(desc(sustainabilityActions.updatedAt))
     .limit(50);
+}
+
+export async function getNotificationInbox(input: { organizationId: number; userId: number; now?: Date }) {
+  const database = await requireDb();
+  const now = input.now ?? new Date();
+  const [alerts, imports, actions, monitoringHealth, states] = await Promise.all([
+    listRecentMonitoringAlerts(input.organizationId),
+    listIngestionBatches(input.organizationId),
+    listSustainabilityActions(input.organizationId),
+    getMonitoringOperationalHealth(input.organizationId, now),
+    database.select().from(userNotificationStates).where(and(eq(userNotificationStates.organizationId, input.organizationId), eq(userNotificationStates.userId, input.userId))),
+  ]);
+  const readAtByKey = new Map(states.map((state) => [state.notificationKey, state.readAt]));
+  const items = buildInboxNotifications({
+    alerts: alerts.map(({ alert, anomaly, meter }) => ({ id: alert.id, status: alert.status, title: alert.title, message: alert.message, createdAt: alert.createdAt, severity: anomaly.severity, meterName: meter.displayName })),
+    imports: imports.map((batch) => ({ id: batch.id, status: batch.status, createdAt: batch.createdAt, errorSummary: batch.errorSummary })),
+    actions: actions.map((action) => ({ id: action.id, title: action.title, status: action.status, targetDate: action.targetDate, updatedAt: action.updatedAt })),
+    monitoringHealth,
+    now,
+  }).map((item) => ({ ...item, readAt: readAtByKey.get(item.key) ?? null }));
+  return { items, unreadCount: items.filter((item) => item.readAt === null).length, disclosure: "Inbox items are derived from stored tenant evidence and user-specific read state. They are in-app records only and do not confirm email, SMS, push, or other external delivery." };
+}
+
+export async function setNotificationReadState(input: { organizationId: number; userId: number; notificationKey: string; read: boolean }) {
+  const database = await requireDb();
+  const readAt = input.read ? new Date() : null;
+  await database.insert(userNotificationStates).values({ organizationId: input.organizationId, userId: input.userId, notificationKey: input.notificationKey, readAt }).onDuplicateKeyUpdate({ set: { readAt, updatedAt: new Date() } });
+  await database.insert(auditEvents).values({ organizationId: input.organizationId, actorUserId: input.userId, eventType: input.read ? "notification.read" : "notification.unread", resourceType: "user_notification", resourceId: input.notificationKey, payload: { notificationKey: input.notificationKey } });
+  return { notificationKey: input.notificationKey, readAt };
 }
 
 export async function updateSustainabilityActionStatus(input: {
@@ -1778,6 +2123,53 @@ export async function updateSustainabilityActionStatus(input: {
     payload: { status: input.status },
   });
   return { id: input.actionId, status: input.status };
+}
+
+export async function assignSustainabilityAction(input: {
+  organizationId: number;
+  actionId: number;
+  ownerUserId: number;
+  userId: number;
+}) {
+  const database = await requireDb();
+  return database.transaction(async (tx) => {
+    const [action] = await tx.select().from(sustainabilityActions).where(and(eq(sustainabilityActions.id, input.actionId), eq(sustainabilityActions.organizationId, input.organizationId))).limit(1);
+    if (!action) return undefined;
+    await tx.update(sustainabilityActions).set({ ownerUserId: input.ownerUserId }).where(eq(sustainabilityActions.id, input.actionId));
+    await tx.insert(auditEvents).values({
+      organizationId: input.organizationId,
+      actorUserId: input.userId,
+      eventType: "action.assigned",
+      resourceType: "sustainability_action",
+      resourceId: String(input.actionId),
+      payload: { previousOwnerUserId: action.ownerUserId, nextOwnerUserId: input.ownerUserId },
+    });
+    return { id: input.actionId, ownerUserId: input.ownerUserId };
+  });
+}
+
+export async function approveSustainabilityAction(input: {
+  organizationId: number;
+  actionId: number;
+  approvalNote?: string;
+  userId: number;
+}) {
+  const database = await requireDb();
+  return database.transaction(async (tx) => {
+    const [action] = await tx.select().from(sustainabilityActions).where(and(eq(sustainabilityActions.id, input.actionId), eq(sustainabilityActions.organizationId, input.organizationId))).limit(1);
+    if (!action) return undefined;
+    const approvedAt = new Date();
+    await tx.update(sustainabilityActions).set({ approvedByUserId: input.userId, approvedAt, approvalNote: input.approvalNote ?? null }).where(eq(sustainabilityActions.id, input.actionId));
+    await tx.insert(auditEvents).values({
+      organizationId: input.organizationId,
+      actorUserId: input.userId,
+      eventType: "action.approved",
+      resourceType: "sustainability_action",
+      resourceId: String(input.actionId),
+      payload: { approvalNote: input.approvalNote ?? null, priorApprovalAt: action.approvedAt?.toISOString() ?? null },
+    });
+    return { id: input.actionId, approvedByUserId: input.userId, approvedAt };
+  });
 }
 
 export async function getOperationsOverview(organizationId: number) {

@@ -21,21 +21,24 @@ import {
 } from "@/components/ui/sidebar";
 import { startLogin } from "@/const";
 import { useIsMobile } from "@/hooks/useMobile";
-import { ArrowUpRight, BrainCircuit, Building2, Calculator, ClipboardCheck, FileText, FileUp, House, LayoutDashboard, LogOut, PanelLeft, Radar, Settings2 } from "lucide-react";
+import { ArrowUpRight, Bell, BrainCircuit, Building2, Calculator, ClipboardCheck, FileText, FileUp, House, LayoutDashboard, LogOut, PanelLeft, Radar, Search, Settings2 } from "lucide-react";
 import React, { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { DashboardLayoutSkeleton } from './DashboardLayoutSkeleton';
 import { Button } from "./ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "./ui/dialog";
 import EcoSphereMark from "./EcoSphereMark";
 
 const menuItems = [
   { icon: LayoutDashboard, label: "Overview", path: "/app" },
+  { icon: Bell, label: "Inbox", path: "/app/notifications" },
   { icon: Building2, label: "Registry", path: "/app/registry" },
   { icon: FileUp, label: "Live Data", path: "/app/data" },
   { icon: BrainCircuit, label: "Intelligence", path: "/app/intelligence" },
   { icon: Calculator, label: "Scenarios", path: "/app/scenarios" },
   { icon: ClipboardCheck, label: "Actions", path: "/app/actions" },
   { icon: FileText, label: "Reports", path: "/app/reports" },
+  { icon: ClipboardCheck, label: "Presenter", path: "/app/presenter" },
   { icon: Radar, label: "Readiness", path: "/app/readiness" },
   { icon: Settings2, label: "Administration", path: "/app/administration" },
   { icon: House, label: "Public narrative", path: "/narrative" },
@@ -79,7 +82,7 @@ export default function DashboardLayout({
           </div>
           <div className="access-docket__actions">
             <Button onClick={() => startLogin()} size="lg" className="access-docket__primary">Authenticate workspace access</Button>
-            <a href="/narrative">Inspect the public pilot narrative <ArrowUpRight size={15}/></a>
+            <div className="access-docket__links"><a href="/explore">Explore all workspaces <ArrowUpRight size={15}/></a><a href="/narrative">Inspect the public pilot narrative <ArrowUpRight size={15}/></a></div>
           </div>
         </section>
       </div>
@@ -115,6 +118,8 @@ function DashboardLayoutContent({
   const { state, toggleSidebar } = useSidebar();
   const isCollapsed = state === "collapsed";
   const [isResizing, setIsResizing] = useState(false);
+  const [navigatorOpen, setNavigatorOpen] = useState(false);
+  const [navigatorQuery, setNavigatorQuery] = useState("");
   const sidebarRef = useRef<HTMLDivElement>(null);
   const activeMenuItem = menuItems.find(item => item.path === location);
   const isMobile = useIsMobile();
@@ -155,6 +160,24 @@ function DashboardLayoutContent({
     };
   }, [isResizing, setSidebarWidth]);
 
+  useEffect(() => {
+    const handleShortcut = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setNavigatorOpen(true);
+      }
+    };
+    window.addEventListener("keydown", handleShortcut);
+    return () => window.removeEventListener("keydown", handleShortcut);
+  }, []);
+
+  const visibleNavigatorItems = menuItems.filter((item) => item.label.toLowerCase().includes(navigatorQuery.trim().toLowerCase()));
+  const openWorkspace = (path: string) => {
+    setLocation(path);
+    setNavigatorOpen(false);
+    setNavigatorQuery("");
+  };
+
   return (
     <>
       <a className="skip-link" href="#workspace-content">Skip to workspace</a>
@@ -183,6 +206,7 @@ function DashboardLayoutContent({
 
           <SidebarContent className="gap-0">
             <div className="sidebar-field-note"><span>AIEM CAMPUS · 2026</span><b>AUTHENTICATED WORKSPACE</b></div>
+            {!isCollapsed ? <button type="button" className="mx-3 mb-2 flex items-center justify-between rounded-md border border-border bg-background px-3 py-2 text-left text-xs text-muted-foreground hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => setNavigatorOpen(true)} aria-label="Open workspace navigator"><span className="flex items-center gap-2"><Search size={14}/> Find a workspace</span><kbd className="rounded border bg-muted px-1.5 py-0.5 text-[10px]">Ctrl K</kbd></button> : null}
             <SidebarMenu className="px-2 py-1">
               {menuItems.map(item => {
                 const isActive = location === item.path;
@@ -260,10 +284,24 @@ function DashboardLayoutContent({
                 </div>
               </div>
             </div>
+            <button type="button" className="rounded-md p-2 text-muted-foreground hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => setNavigatorOpen(true)} aria-label="Open workspace navigator"><Search size={18}/></button>
           </div>
         )}
         <main id="workspace-content" className="flex-1 p-4" tabIndex={-1}>{children}</main>
       </SidebarInset>
+      <Dialog open={navigatorOpen} onOpenChange={(open) => { setNavigatorOpen(open); if (!open) setNavigatorQuery(""); }}>
+        <DialogContent className="sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle>Workspace navigator</DialogTitle>
+            <DialogDescription>Search and open an authenticated EcoSphere workspace. Use Ctrl/⌘ K from any workspace.</DialogDescription>
+          </DialogHeader>
+          <label className="sr-only" htmlFor="workspace-navigator-search">Search workspaces</label>
+          <input id="workspace-navigator-search" autoFocus value={navigatorQuery} onChange={(event) => setNavigatorQuery(event.target.value)} placeholder="Search workspaces…" className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring" />
+          <div className="max-h-80 overflow-y-auto rounded-md border border-border" aria-label="Workspace search results">
+            {visibleNavigatorItems.length ? visibleNavigatorItems.map((item) => { const Icon = item.icon; return <button key={item.path} type="button" onClick={() => openWorkspace(item.path)} className="flex w-full items-center gap-3 border-b border-border px-3 py-3 text-left last:border-b-0 hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"><Icon size={17}/><span className="flex-1"><b className="block text-sm">{item.label}</b><small className="text-xs text-muted-foreground">{item.path === "/narrative" ? "Public pilot narrative" : "Protected operational workspace"}</small></span><ArrowUpRight size={15}/></button>; }) : <p className="p-4 text-sm text-muted-foreground">No workspace matches this search. The navigator does not invent unavailable pages.</p>}
+          </div>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

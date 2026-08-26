@@ -268,3 +268,34 @@
 - [x] Add a focused first-run demo checklist that distinguishes simulated evidence and links operators directly to the guided simulation controls.
 - [x] Improve key workspace mutation feedback with consistent polite status and alert semantics without hiding server errors.
 - [x] Align the signed-out workspace entry with the Field Operations Ledger design system using clear access-provenance and evidence-boundary language.
+- [x] Add a tenant-scoped operational baseline manager with explicit meter and UTC-window evidence, deterministic aggregate calculations, and saved comparison context.
+- [x] Execute a comprehensive locally verifiable end-to-end product inspection, remedy all reproducible defects, and preserve explicit deferred deployment-environment limits.
+- [x] Perform a skeptical judge-style flaw assessment that distinguishes observed weaknesses, deferred release gates, and honest claim boundaries.
+- [x] Align the public narrative with implemented capabilities and eliminate its divergent client-side numerical simulator authority.
+- [x] Publish a current feature inventory and prioritized locally feasible expansion backlog after the narrative/model alignment review.
+- [x] Implement a tenant-scoped realized-versus-modeled outcome loop using explicit accepted-reading windows, saved scenario context, deterministic comparison, and non-realization-safe disclosure.
+- [x] Add deterministic scenario sensitivity analysis with explicit low/base/high tariff, factor, capex, and implementation-performance assumptions.
+- [x] Add a tenant-scoped Meter Freshness Board showing each active meter’s latest accepted evidence, data age, and explicit no-data status.
+- [x] Add an evidence-led Presenter Mode that guides a judge from demo setup through monitoring, intelligence, scenario, outcome, and report workspaces without fabricating tenant data.
+- [x] Add an accessible Scenario Methodology Drawer exposing pilot factors, formulas, sensitivity mechanics, and explicit non-certification limits beside server-authoritative outputs.
+- [x] Add tenant-scoped action due-date capture, audit context, and clear overdue/completed deadline status without implying an unbuilt approval or assignment workflow.
+- [x] Add a tenant-scoped EcoScore explanation that exposes the latest persisted score, deterministic component evidence, and pilot-score limitations without inventing causal attribution.
+- [x] Add tenant-scoped, time-bounded maintenance windows that transparently suppress matching alert creation while retaining readings, anomaly evidence, audit records, and visible suppression state.
+- [x] Add tenant-scoped configurable data-quality rule profiles for prospective reading validation with explicit versioning and non-retroactive evidence boundaries.
+- [x] Add a stored-evidence methodology appendix to executive report views and exports with factor, model, provenance, and explicit non-certification disclosures.
+- [x] Add tenant-scoped action assignment and explicit approval evidence with auditable role boundaries, without claiming automated routing or external notification delivery.
+- [x] Audit the full route map and current entry behavior, then improve interactive ecosystem discovery, navigation, and first-use guidance beyond the landing page.
+- [x] Add a deterministic tenant-scoped intervention portfolio optimizer with visible budget/selection constraints and modeled-output limitations.
+- [x] Add a role-aware authenticated operating-loop guide that provides actionable setup, demo, intelligence, scenario, action, and report handoffs without fabricating completion state.
+- [x] Add a tenant-scoped in-app notification centre for existing alerts, failed imports, overdue actions, and monitoring health without claiming external delivery.
+- [x] Add deterministic tenant-scoped operating-calendar windows so monitoring can distinguish explicitly configured off-hours from normal operating periods without suppressing data, quality findings, or score evidence.
+- [x] Add a tenant-scoped campus equipment registry that links assets to sites and optional meters, preserves status/lifecycle audit evidence, and does not imply live telemetry or maintenance automation.
+- [x] Add an accessible authenticated quick navigator so users can discover and switch among operational workspaces without relying only on the sidebar.
+- [ ] Verify deployed health, readiness, OAuth, tenant access, and controlled scheduler prerequisites against the actual production environment.
+- [ ] Assess and document the deployed invitation-delivery, restore-rehearsal, accessibility, and performance validation gates without claiming unavailable external services.
+- [x] Replace the public field-marker asset request that currently returns 500 in production with a self-contained marker and verify the local source fix.
+- [x] Provide a secure, user-facing Vercel production-configuration guide that explains where each required value comes from without exposing secrets.
+- [ ] Check availability of ecosphereai.vercel.app, present safe Vercel URL alternatives, and update the production callback documentation only after the final URL is confirmed.
+- [x] Prepare accurate, form-ready AIEM IDEAS 2026 registration responses for EcoSphere AI without submitting the form or inventing personal member details.
+- [x] Create polished PDF and DOCX versions of the complete EcoSphere AI idea dossier and confirmed AIEM IDEAS 2026 team-registration details.
+- [ ] Commit and push the completed EcoSphere AI source, documentation, and requested AIEM IDEAS dossier deliverables to the configured GitHub repository without rewriting remote history.

@@ -9,6 +9,7 @@ import {
   evaluateReadingQuality,
   type AnomalySeverity,
 } from "../domain/monitoring";
+import { classifyOperatingCalendar } from "../domain/operatingCalendar";
 
 export type MonitoringTrigger = "manual" | "scheduled" | "cli";
 
@@ -79,13 +80,18 @@ export async function runMonitoringForOrganization(input: {
   }
 
   try {
-    const [readings, pendingReadings, approvedFactors] = await Promise.all([
+    const [readings, pendingReadings, approvedFactors, qualityRuleProfiles, operatingCalendarWindows] = await Promise.all([
       db.listReadingsForMonitoring(input.organizationId),
       db.listUnprocessedReadingsForMonitoring(input.organizationId, DATA_QUALITY_VERSION),
       db.listApprovedEmissionFactors(input.organizationId),
+      db.listDataQualityRuleProfiles(input.organizationId),
+      db.listActiveOperatingCalendarWindows(input.organizationId),
     ]);
+    const qualityProfileByResource = new Map(qualityRuleProfiles.map((profile) => [profile.resourceType, { id: profile.id, version: profile.version, highValueCeiling: Number(profile.highValueCeiling), futureToleranceMinutes: profile.futureToleranceMinutes }]));
+    const calendarWindowsByMeter = new Map<number, typeof operatingCalendarWindows>();
+    for (const window of operatingCalendarWindows) calendarWindowsByMeter.set(window.meterId, [...(calendarWindowsByMeter.get(window.meterId) ?? []), window]);
     const pendingReadingIds = new Set(pendingReadings.map((item) => item.reading.id));
-    const histories = new Map<number, number[]>();
+    const histories = new Map<string, number[]>();
     const qualityStatuses: ("passed" | "warning" | "failed")[] = [];
     const energyCarbonValues: number[] = [];
     let qualityFindingsCreated = 0;
@@ -100,6 +106,7 @@ export async function runMonitoringForOrganization(input: {
         canonicalUnit: item.meter.canonicalUnit,
         resourceType: item.meter.resourceType,
         observedAt: item.reading.observedAt,
+        ruleProfile: qualityProfileByResource.get(item.meter.resourceType),
       });
       const isPending = pendingReadingIds.has(item.reading.id);
       if (isPending) {
@@ -114,7 +121,9 @@ export async function runMonitoringForOrganization(input: {
       }
       qualityStatuses.push(...findings.map((finding) => finding.status));
 
-      const priorValues = histories.get(item.meter.id) ?? [];
+      const calendarContext = classifyOperatingCalendar({ windows: calendarWindowsByMeter.get(item.meter.id) ?? [], observedAt: item.reading.observedAt });
+      const historyKey = `${item.meter.id}:${calendarContext.baselineBucket}`;
+      const priorValues = histories.get(historyKey) ?? [];
       const hasFailedQuality = findings.some((finding) => finding.status === "failed");
       const hasFutureTimestampWarning = findings.some((finding) => finding.ruleId === "future-timestamp" && finding.status === "warning");
       const isEligibleForAnalytics = !hasFailedQuality && !hasFutureTimestampWarning;
@@ -132,21 +141,26 @@ export async function runMonitoringForOrganization(input: {
             baselineStdDev: anomaly.baselineStdDev,
             observedValue: value,
             zScore: anomaly.zScore,
-            evidence: { historySize: anomaly.historySize, readingObservedAt: item.reading.observedAt.toISOString() },
+            evidence: { historySize: anomaly.historySize, readingObservedAt: item.reading.observedAt.toISOString(), operatingCalendar: calendarContext },
           });
           if (anomalyResult.created) {
             anomaliesCreated += 1;
             if (anomaly.severity !== "low") {
-              const alertResult = await db.createMonitoringAlertIfAbsent({
+              const maintenanceWindow = await db.getActiveMaintenanceWindow(input.organizationId, item.meter.id, item.reading.observedAt);
+              if (maintenanceWindow) {
+                await db.markAnomalyAlertSuppressed({ organizationId: input.organizationId, anomalyId: anomalyResult.anomalyId, maintenanceWindowId: maintenanceWindow.id });
+              } else {
+                const alertResult = await db.createMonitoringAlertIfAbsent({
                 organizationId: input.organizationId,
                 anomalyId: anomalyResult.anomalyId,
                 severity: anomaly.severity,
                 title: `${anomaly.severity.toUpperCase()} ${item.meter.displayName} deviation`,
                 message: alertMessage({ meterName: item.meter.displayName, observedValue: value, baselineMean: anomaly.baselineMean, zScore: anomaly.zScore }),
-              });
-              alertsCreated += alertResult.created ? 1 : 0;
-              if (alertResult.created) {
-                await deliverOwnerNotificationForAlert({ organizationId: input.organizationId, alertId: alertResult.alertId });
+                });
+                alertsCreated += alertResult.created ? 1 : 0;
+                if (alertResult.created) {
+                  await deliverOwnerNotificationForAlert({ organizationId: input.organizationId, alertId: alertResult.alertId });
+                }
               }
             }
           }
@@ -172,7 +186,7 @@ export async function runMonitoringForOrganization(input: {
           energyCarbonValues.push(carbon.emittedKgCo2e);
         }
         appendBoundedHistory(priorValues, value);
-        histories.set(item.meter.id, priorValues);
+        histories.set(historyKey, priorValues);
       }
     }
 

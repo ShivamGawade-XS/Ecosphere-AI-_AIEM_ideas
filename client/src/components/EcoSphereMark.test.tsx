@@ -1,16 +1,15 @@
 /** @vitest-environment jsdom */
 import React from "react";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import EcoSphereMark from "./EcoSphereMark";
 
 describe("EcoSphereMark", () => {
-  it("retains recognizable product identity if the optional brand image cannot load", () => {
+  it("uses a self-contained accessible vector field marker without a remote image dependency", () => {
     render(<EcoSphereMark />);
-    const image = screen.getByAltText("EcoSphere AI field marker");
-    fireEvent.error(image);
-    expect(screen.queryByAltText("EcoSphere AI field marker")).toBeNull();
-    expect(screen.getByText("ES")).toBeTruthy();
+    const marker = screen.getByRole("img", { name: "EcoSphere AI field marker" });
+    expect(marker.tagName.toLowerCase()).toBe("svg");
+    expect(marker.querySelector("path")).toBeTruthy();
     expect(screen.getByLabelText("EcoSphere AI")).toBeTruthy();
   });
 });

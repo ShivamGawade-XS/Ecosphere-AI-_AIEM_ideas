@@ -1,0 +1,11 @@
+{
+  "task_kind": "markdown-to-pdf",
+  "output": "pdf",
+  "signals": [],
+  "hard_constraints": ["professional project dossier", "portrait A4 pages", "team roster table", "form-ready registration content"],
+  "content_features": {
+    "code_blocks": 0,
+    "defined_terms": 6,
+    "portrait_images": 0
+  }
+}

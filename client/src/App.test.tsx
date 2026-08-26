@@ -17,6 +17,7 @@ vi.mock("./components/DashboardLayout", () => ({
 }));
 
 vi.mock("./pages/Home", () => ({ default: () => <h1>PUBLIC NARRATIVE WORKSPACE</h1> }));
+vi.mock("./pages/EcosystemDirectory", () => ({ default: () => <h1>PUBLIC ECOSYSTEM DIRECTORY</h1> }));
 vi.mock("./pages/OperationsOverview", () => ({ default: () => <h1>OPERATIONS OVERVIEW WORKSPACE</h1> }));
 vi.mock("./pages/ImplementationDashboard", () => ({ default: () => <h1>READINESS WORKSPACE</h1> }));
 vi.mock("./pages/IngestionWorkbench", () => ({ default: () => <h1>LIVE DATA WORKSPACE</h1> }));
@@ -46,6 +47,13 @@ describe("EcoSphere application entry routes", () => {
     renderAt("/narrative");
 
     expect(await screen.findByRole("heading", { name: "PUBLIC NARRATIVE WORKSPACE" })).toBeTruthy();
+    expect(screen.queryByTestId("operations-shell")).toBeNull();
+  });
+
+  it("keeps the interactive ecosystem directory on a dedicated public route", async () => {
+    renderAt("/explore");
+
+    expect(await screen.findByRole("heading", { name: "PUBLIC ECOSYSTEM DIRECTORY" })).toBeTruthy();
     expect(screen.queryByTestId("operations-shell")).toBeNull();
   });
 

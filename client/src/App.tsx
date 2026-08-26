@@ -7,6 +7,8 @@ import { ThemeProvider } from "./contexts/ThemeContext";
 import DashboardLayout from "./components/DashboardLayout";
 
 const Home = lazy(() => import("./pages/Home"));
+const EcosystemDirectory = lazy(() => import("./pages/EcosystemDirectory"));
+const NotificationsWorkspace = lazy(() => import("./pages/NotificationsWorkspace"));
 const ImplementationDashboard = lazy(() => import("./pages/ImplementationDashboard"));
 const IngestionWorkbench = lazy(() => import("./pages/IngestionWorkbench"));
 const OperationsOverview = lazy(() => import("./pages/OperationsOverview"));
@@ -16,6 +18,7 @@ const ActionsWorkspace = lazy(() => import("./pages/ActionsWorkspace"));
 const ReportsWorkspace = lazy(() => import("./pages/ReportsWorkspace"));
 const ScenarioWorkspace = lazy(() => import("./pages/ScenarioWorkspace"));
 const AdministrationWorkspace = lazy(() => import("./pages/AdministrationWorkspace"));
+const PresenterMode = lazy(() => import("./pages/PresenterMode"));
 
 function RouteLoading() {
   return <div className="app-loading-state">Loading workspace…</div>;
@@ -31,13 +34,16 @@ function Router() {
     <Switch>
       <Route path={"/"}><ProtectedWorkspace><OperationsOverview /></ProtectedWorkspace></Route>
       <Route path={"/narrative"}><Suspense fallback={<RouteLoading />}><Home /></Suspense></Route>
+      <Route path={"/explore"}><Suspense fallback={<RouteLoading />}><EcosystemDirectory /></Suspense></Route>
       <Route path={"/app"}><ProtectedWorkspace><OperationsOverview /></ProtectedWorkspace></Route>
+      <Route path={"/app/notifications"}><ProtectedWorkspace><NotificationsWorkspace /></ProtectedWorkspace></Route>
       <Route path={"/app/registry"}><ProtectedWorkspace><RegistryWorkspace /></ProtectedWorkspace></Route>
       <Route path={"/app/data"}><ProtectedWorkspace><IngestionWorkbench /></ProtectedWorkspace></Route>
       <Route path={"/app/intelligence"}><ProtectedWorkspace><IntelligenceWorkspace /></ProtectedWorkspace></Route>
       <Route path={"/app/scenarios"}><ProtectedWorkspace><ScenarioWorkspace /></ProtectedWorkspace></Route>
       <Route path={"/app/actions"}><ProtectedWorkspace><ActionsWorkspace /></ProtectedWorkspace></Route>
       <Route path={"/app/reports"}><ProtectedWorkspace><ReportsWorkspace /></ProtectedWorkspace></Route>
+      <Route path={"/app/presenter"}><ProtectedWorkspace><PresenterMode /></ProtectedWorkspace></Route>
       <Route path={"/app/readiness"}><ProtectedWorkspace><ImplementationDashboard /></ProtectedWorkspace></Route>
       <Route path={"/app/administration"}><ProtectedWorkspace><AdministrationWorkspace /></ProtectedWorkspace></Route>
       <Route path={"/404"} component={NotFound} />

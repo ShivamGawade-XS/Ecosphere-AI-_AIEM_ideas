@@ -35,13 +35,16 @@ export function evaluateReadingQuality(input: {
   resourceType: ResourceType;
   observedAt: Date;
   now?: Date;
+  ruleProfile?: { id: number; version: number; highValueCeiling: number; futureToleranceMinutes: number };
 }): QualityFindingInput[] {
   const now = input.now ?? new Date();
+  const futureToleranceMinutes = input.ruleProfile?.futureToleranceMinutes ?? 5;
+  const highValueCeiling = input.ruleProfile?.highValueCeiling ?? PILOT_SAFETY_CEILINGS[input.resourceType];
   const isFiniteValue = Number.isFinite(input.value);
   const requiredStatus: QualityStatus = isFiniteValue && input.value >= 0 ? "passed" : "failed";
   const canonicalStatus: QualityStatus = input.unit === input.canonicalUnit ? "passed" : "failed";
-  const futureStatus: QualityStatus = input.observedAt.getTime() > now.getTime() + 5 * 60_000 ? "warning" : "passed";
-  const highValueStatus: QualityStatus = isFiniteValue && input.value > PILOT_SAFETY_CEILINGS[input.resourceType] ? "warning" : "passed";
+  const futureStatus: QualityStatus = input.observedAt.getTime() > now.getTime() + futureToleranceMinutes * 60_000 ? "warning" : "passed";
+  const highValueStatus: QualityStatus = isFiniteValue && input.value > highValueCeiling ? "warning" : "passed";
 
   return [
     {
@@ -59,14 +62,14 @@ export function evaluateReadingQuality(input: {
     {
       ruleId: "future-timestamp",
       status: futureStatus,
-      message: futureStatus === "passed" ? "Reading timestamp is not materially ahead of processing time." : "Reading timestamp is more than five minutes in the future.",
-      details: { observedAt: input.observedAt.toISOString(), evaluatedAt: now.toISOString() },
+      message: futureStatus === "passed" ? "Reading timestamp is not materially ahead of processing time." : "Reading timestamp exceeds the configured future tolerance.",
+      details: { observedAt: input.observedAt.toISOString(), evaluatedAt: now.toISOString(), futureToleranceMinutes, ruleProfileId: input.ruleProfile?.id ?? null, ruleProfileVersion: input.ruleProfile?.version ?? null },
     },
     {
       ruleId: "high-absolute-value",
       status: highValueStatus,
-      message: highValueStatus === "passed" ? "Reading is within the pilot safety ceiling." : "Reading exceeds the pilot safety ceiling and requires review.",
-      details: { resourceType: input.resourceType, ceiling: PILOT_SAFETY_CEILINGS[input.resourceType], value: input.value },
+      message: highValueStatus === "passed" ? "Reading is within the active safety ceiling." : "Reading exceeds the active safety ceiling and requires review.",
+      details: { resourceType: input.resourceType, ceiling: highValueCeiling, value: input.value, ruleProfileId: input.ruleProfile?.id ?? null, ruleProfileVersion: input.ruleProfile?.version ?? null },
     },
   ];
 }

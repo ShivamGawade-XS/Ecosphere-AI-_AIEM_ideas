@@ -3,7 +3,7 @@
  * Uses field-paper surfaces, moss ink, provenance labels, and chartreuse only
  * as an operational signal. Numerical outputs are explicit modeled estimates.
  */
-import { useMemo, useRef, useState } from "react";
+import React, { useRef, useState } from "react";
 import {
   Activity,
   ArrowDownRight,
@@ -27,18 +27,18 @@ import EcoSphereMark from "@/components/EcoSphereMark";
 
 const stages = [
   { id: "monitor", label: "Monitor", title: "Start with a trusted reading.", copy: "The implemented platform foundation persists authenticated meter readings with source, unit, and provenance evidence.", icon: Activity, proof: "Registry + ingestion" },
-  { id: "detect", label: "Detect", title: "Make unusual movement visible.", copy: "The next monitoring service will turn validated baseline deviation into an operational event and alert.", icon: Radar, proof: "Planned: anomaly → alert" },
-  { id: "predict", label: "Predict", title: "Read the short-term direction.", copy: "The planned analytics service will provide a bounded forecast with visible assumptions and factor versions.", icon: CircleGauge, proof: "Planned: bounded forecast" },
-  { id: "simulate", label: "Simulate", title: "Test the intervention before the budget.", copy: "The public prototype shows transparent modeled inputs; a server-authoritative scenario service is tracked in the readiness workspace.", icon: Calculator, proof: "Prototype scenario" },
-  { id: "recommend", label: "Recommend", title: "Give the team a practical next move.", copy: "The planned recommendation service will cite recorded evidence. AI explanations must never create environmental numbers.", icon: ShieldCheck, proof: "Planned: evidence-linked action" },
+  { id: "detect", label: "Detect", title: "Make unusual movement visible.", copy: "The server-side monitoring worker turns validated baseline deviation into persisted anomaly and alert evidence.", icon: Radar, proof: "Worker: anomaly → alert" },
+  { id: "predict", label: "Predict", title: "Read the short-term direction.", copy: "The protected analytics workspace compares bounded forecast candidates and preserves the selected method with its evidence.", icon: CircleGauge, proof: "Deterministic forecast" },
+  { id: "simulate", label: "Simulate", title: "Test the intervention before the budget.", copy: "The protected scenario workspace calculates a versioned, server-authoritative model from explicit assumptions and retained evidence.", icon: Calculator, proof: "Server calculation" },
+  { id: "recommend", label: "Recommend", title: "Give the team a practical next move.", copy: "Evidence-linked recommendations expose their rule basis and limits. Explanatory AI must never create environmental numbers.", icon: ShieldCheck, proof: "Evidence-linked action" },
   { id: "act", label: "Act", title: "Close the gap in the real campus.", copy: "The pilot focuses attention on a small set of high-value resource streams and interventions.", icon: Zap, proof: "Pilot-ready scope" },
-  { id: "measure", label: "Measure", title: "Return to the same baseline.", copy: "The operational loop is designed to compare modeled action with later measured evidence once a monitoring worker is deployed.", icon: Activity, proof: "Measurement-after-action" },
+  { id: "measure", label: "Measure", title: "Return to the same baseline.", copy: "Saved targets, baselines, actions, and later readings make measurement-after-action inspectable; realized savings still require a live pilot.", icon: Activity, proof: "Evidence follow-through" },
 ];
 
 const evidence = [
-  { label: "DATA LINEAGE", value: "SIMULATED", note: "AIEM Campus fixture. The new data foundation records source, unit, and provenance for live inputs.", icon: Database },
-  { label: "NUMERICAL AUTHORITY", value: "ENGINE", note: "The prototype calculations are deterministic; authoritative server calculations remain tracked work.", icon: Calculator },
-  { label: "AI BOUNDARY", value: "CONSTRAINED", note: "Planned AI explanations will frame recorded evidence and will not invent environmental numbers.", icon: ShieldCheck },
+  { label: "DATA LINEAGE", value: "PROVENANCED", note: "Demo fixtures are explicitly simulated. Protected readings retain source, unit, and lineage evidence.", icon: Database },
+  { label: "NUMERICAL AUTHORITY", value: "SERVER", note: "Protected scenario, score, and monitoring calculations are deterministic and versioned on the server.", icon: Calculator },
+  { label: "AI BOUNDARY", value: "CONSTRAINED", note: "Explanatory AI may frame recorded evidence but never supplies numerical authority.", icon: ShieldCheck },
 ];
 
 const interventions = [
@@ -48,27 +48,13 @@ const interventions = [
   { id: "water", title: "Water-saving systems", detail: "Tighten consumption at the meter.", score: "4", icon: Droplets, tone: "sand", energy: 0, renewable: 0, water: 25, waste: 10, recycling: 10, investment: 250000 },
 ];
 
-function formatINR(value: number) {
-  return new Intl.NumberFormat("en-IN", {
-    style: "currency",
-    currency: "INR",
-    maximumFractionDigits: 0,
-  }).format(value);
-}
-
 function scrollToSection(id: string) {
   document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 export default function Home() {
   const [activeStage, setActiveStage] = useState("detect");
-  const [energyReduction, setEnergyReduction] = useState(15);
-  const [renewableShare, setRenewableShare] = useState(20);
-  const [waterReduction, setWaterReduction] = useState(10);
-  const [wasteReduction, setWasteReduction] = useState(10);
-  const [recyclingRate, setRecyclingRate] = useState(25);
-  const [investment, setInvestment] = useState(500000);
-  const [selectedIntervention, setSelectedIntervention] = useState("custom");
+  const [selectedIntervention, setSelectedIntervention] = useState<string | null>(null);
   const [processingPreset, setProcessingPreset] = useState<string | null>(null);
   const [processingStatus, setProcessingStatus] = useState("Ready to model an intervention.");
   const stageRefs = useRef<Array<HTMLButtonElement | null>>([]);
@@ -76,39 +62,6 @@ export default function Home() {
 
   const active = stages.find((stage) => stage.id === activeStage) ?? stages[1];
   const ActiveIcon = active.icon;
-
-  const model = useMemo(() => {
-    const baseline = { energy: 9780, water: 1270, waste: 985, carbon: 6420 };
-    const annualEnergySaved = baseline.energy * (energyReduction / 100);
-    const electricityCarbon = baseline.carbon * 0.72;
-    const waterCarbon = baseline.carbon * 0.12;
-    const wasteCarbon = baseline.carbon * 0.16;
-    const directReduction = electricityCarbon * (energyReduction / 100);
-    const renewableReduction = electricityCarbon * (1 - energyReduction / 100) * (renewableShare / 100);
-    const waterCarbonReduction = waterCarbon * (waterReduction / 100);
-    const wasteCarbonReduction = wasteCarbon * (wasteReduction / 100);
-    const recyclingCarbonReduction = wasteCarbon * (1 - wasteReduction / 100) * (recyclingRate / 100);
-    const carbonReduction = directReduction + renewableReduction + waterCarbonReduction + wasteCarbonReduction + recyclingCarbonReduction;
-    const projectedCarbon = Math.max(0, baseline.carbon - carbonReduction);
-    const annualWaterSaved = baseline.water * (waterReduction / 100);
-    const divertedWaste = baseline.waste * (1 - wasteReduction / 100) * (recyclingRate / 100);
-    const avoidedWaste = baseline.waste * (wasteReduction / 100) + divertedWaste;
-    const annualSavings = annualEnergySaved * 9.2 + annualWaterSaved * 56 + avoidedWaste * 4.2 + renewableShare * 1450;
-    const payback = annualSavings > 0 ? investment / annualSavings : 0;
-    const roi = investment > 0 ? ((annualSavings * 3 - investment) / investment) * 100 : 0;
-
-    return {
-      ...baseline,
-      annualEnergySaved,
-      annualWaterSaved,
-      avoidedWaste,
-      projectedCarbon,
-      carbonReduction,
-      annualSavings,
-      payback,
-      roi,
-    };
-  }, [energyReduction, renewableShare, waterReduction, wasteReduction, recyclingRate, investment]);
 
   function activateStage(index: number) {
     setActiveStage(stages[index].id);
@@ -132,25 +85,14 @@ export default function Home() {
     if (processingPreset) return;
     if (processingTimer.current) window.clearTimeout(processingTimer.current);
     setProcessingPreset(intervention.id);
-    setProcessingStatus(`Processing ${intervention.title} against the AIEM Campus baseline…`);
+    setProcessingStatus(`Reviewing ${intervention.title} as a public scenario choice…`);
     processingTimer.current = window.setTimeout(() => {
-      setEnergyReduction(intervention.energy);
-      setRenewableShare(intervention.renewable);
-      setWaterReduction(intervention.water);
-      setWasteReduction(intervention.waste);
-      setRecyclingRate(intervention.recycling);
-      setInvestment(intervention.investment);
       setSelectedIntervention(intervention.id);
       setProcessingPreset(null);
-      setProcessingStatus(`${intervention.title} preset applied. Modeled outputs updated.`);
+      setProcessingStatus(`${intervention.title} selected. Open the protected workspace to calculate using tenant evidence and the server model.`);
       processingTimer.current = null;
     }, 720);
     requestAnimationFrame(() => document.getElementById("simulator")?.scrollIntoView({ behavior: "smooth", block: "start" }));
-  }
-
-  function setScenarioValue(setter: (value: number) => void, value: number) {
-    setter(value);
-    setSelectedIntervention("custom");
   }
 
   return (
@@ -163,6 +105,7 @@ export default function Home() {
           <a href="#loop">The loop</a>
           <a href="#simulator">Scenario engine</a>
           <a href="#pilot">Pilot scope</a>
+          <a href="/explore">Workspace map</a>
         </nav>
         <a className="header-cta" href="/">
           Open workspace <ArrowDownRight size={16} />
@@ -306,64 +249,39 @@ export default function Home() {
             <span className="eyebrow eyebrow--light">THE SCENARIO ENGINE</span>
             <h2>Test an action before you fund it.</h2>
           </div>
-          <p>Adjust the transparent assumptions. The output below is a browser-side representation of the pilot’s deterministic scenario logic, not a guarantee of realized impact.</p>
+          <p>Choose an intervention to understand the decision path. Numerical outputs are intentionally reserved for the protected server-authoritative scenario workspace, where tenant evidence and factor versions are retained.</p>
         </div>
         <div className="simulator-grid">
           <aside className="control-panel">
-            <div className="panel-label"><span>SCENARIO / A</span><span>MODELED</span></div>
-            <label className="slider-row">
-              <span><b>Energy reduction</b><output>{energyReduction}%</output></span>
-              <input type="range" min="0" max="35" value={energyReduction} onChange={(event) => setScenarioValue(setEnergyReduction, Number(event.target.value))} />
-              <small>Demand-side action against energy baseline</small>
-            </label>
-            <label className="slider-row">
-              <span><b>Renewable contribution</b><output>{renewableShare}%</output></span>
-              <input type="range" min="0" max="50" value={renewableShare} onChange={(event) => setScenarioValue(setRenewableShare, Number(event.target.value))} />
-              <small>Modeled share of remaining electricity emissions</small>
-            </label>
-            <label className="slider-row">
-              <span><b>Water reduction</b><output>{waterReduction}%</output></span>
-              <input type="range" min="0" max="40" value={waterReduction} onChange={(event) => setScenarioValue(setWaterReduction, Number(event.target.value))} />
-              <small>Demand-side action against main-water baseline</small>
-            </label>
-            <label className="slider-row">
-              <span><b>Waste reduction</b><output>{wasteReduction}%</output></span>
-              <input type="range" min="0" max="40" value={wasteReduction} onChange={(event) => setScenarioValue(setWasteReduction, Number(event.target.value))} />
-              <small>Modeled source reduction before disposal</small>
-            </label>
-            <label className="slider-row">
-              <span><b>Recycling contribution</b><output>{recyclingRate}%</output></span>
-              <input type="range" min="0" max="60" value={recyclingRate} onChange={(event) => setScenarioValue(setRecyclingRate, Number(event.target.value))} />
-              <small>Modeled share of remaining waste diverted from disposal</small>
-            </label>
-            <label className="slider-row">
-              <span><b>Investment</b><output>{formatINR(investment)}</output></span>
-              <input type="range" min="100000" max="1500000" step="50000" value={investment} onChange={(event) => setScenarioValue(setInvestment, Number(event.target.value))} />
-              <small>Transparent scenario input, not a procurement quote</small>
-            </label>
-            <div className="control-note"><ShieldCheck size={16} /> Numerical source: <b>scenario calculation engine</b></div>
+            <div className="panel-label"><span>PUBLIC CHOICE</span><span>NO NUMBERS</span></div>
+            <div className="slider-row"><span><b>1. Select an intervention</b></span><small>Choose a common campus intervention from the decision queue.</small></div>
+            <div className="slider-row"><span><b>2. Authenticate the workspace</b></span><small>Open the tenant-scoped Scenario Workspace with a configured organization.</small></div>
+            <div className="slider-row"><span><b>3. Set or apply a baseline</b></span><small>Use explicit model inputs or an accepted-reading meter window; the product does not silently annualize evidence.</small></div>
+            <div className="slider-row"><span><b>4. Calculate on the server</b></span><small>Save the calculation version, factor disclosure, modeled SDG contribution, and decision context.</small></div>
+            <a className="button button--paper" href="/app/scenarios">Open the verified Scenario Workspace <MoveRight size={17} /></a>
+            <div className="control-note"><ShieldCheck size={16} /> Numerical authority: <b>protected server calculation only</b></div>
           </aside>
 
           <div className="scenario-output">
-            <div className="output-topline"><span>BEFORE → AFTER</span><span className="simulated-tag">SIMULATED RESULT</span></div>
+            <div className="output-topline"><span>CHOICE → EVIDENCE → DECISION</span><span className="simulated-tag">WORKSPACE-GATED</span></div>
             <div className={`scenario-live-status ${processingPreset ? "scenario-live-status--processing" : ""}`} role="status" aria-live="polite" aria-atomic="true">
-              <span>{processingPreset ? <><i className="processing-spinner" aria-hidden="true" /> PROCESSING PRESET</> : selectedIntervention === "custom" ? "CUSTOM SCENARIO" : `PRESET / ${interventions.find((item) => item.id === selectedIntervention)?.title.toUpperCase()}`}</span>
-              <b>{processingPreset ? processingStatus : `${Math.round(model.carbonReduction).toLocaleString()} kgCO₂e modeled reduction`}</b>
+              <span>{processingPreset ? <><i className="processing-spinner" aria-hidden="true" /> PREPARING CHOICE</> : selectedIntervention ? `SELECTED / ${interventions.find((item) => item.id === selectedIntervention)?.title.toUpperCase()}` : "AWAITING INTERVENTION"}</span>
+              <b>{processingPreset ? processingStatus : selectedIntervention ? "Ready for a tenant-evidence calculation." : "Select an intervention; no public numeric result is shown."}</b>
             </div>
             <div className="carbon-bar-wrap">
-              <div className="carbon-values"><span>{model.carbon.toLocaleString()} kgCO₂e</span><ArrowDownRight size={18}/><strong>{Math.round(model.projectedCarbon).toLocaleString()} kgCO₂e</strong></div>
-              <div className="carbon-bar"><span style={{ width: `${Math.min(100, (model.projectedCarbon / model.carbon) * 100)}%` }} /></div>
-              <p><b>{Math.round(model.carbonReduction).toLocaleString()} kgCO₂e</b> modeled reduction from the selected inputs.</p>
+              <div className="carbon-values"><span>ACCEPTED READING EVIDENCE</span><ArrowDownRight size={18}/><strong>VERSIONED SERVER RESULT</strong></div>
+              <div className="carbon-bar"><span style={{ width: "58%" }} /></div>
+              <p><b>Why no public number?</b> A carbon, savings, ROI, or payback result is shown only after the protected workspace records the selected inputs, factor set, and modeled-evidence boundary.</p>
             </div>
             <div className="output-stat-grid">
-              <div><span>ENERGY AVOIDED</span><strong>{Math.round(model.annualEnergySaved).toLocaleString()} <small>kWh/yr</small></strong></div>
-              <div><span>WATER AVOIDED</span><strong>{Math.round(model.annualWaterSaved).toLocaleString()} <small>m³/yr</small></strong></div>
-              <div><span>WASTE AVOIDED</span><strong>{Math.round(model.avoidedWaste).toLocaleString()} <small>kg/yr</small></strong></div>
-              <div><span>ANNUAL SAVINGS</span><strong>{formatINR(model.annualSavings)}</strong></div>
-              <div><span>PAYBACK</span><strong>{model.payback > 0 ? `${model.payback.toFixed(1)} yrs` : "—"}</strong></div>
-              <div><span>3-YEAR ROI</span><strong>{Math.round(model.roi)}<small>%</small></strong></div>
+              <div><span>INPUTS</span><strong>Explicit <small>operator-entered</small></strong></div>
+              <div><span>BASELINE</span><strong>Accepted <small>reading evidence</small></strong></div>
+              <div><span>FACTORS</span><strong>Versioned <small>disclosed</small></strong></div>
+              <div><span>CARBON</span><strong>Modeled <small>not certified</small></strong></div>
+              <div><span>SAVINGS</span><strong>Estimated <small>not guaranteed</small></strong></div>
+              <div><span>DECISION</span><strong>Traceable <small>saved context</small></strong></div>
             </div>
-            <div className="sdg-line"><span>PRIMARY OUTCOME</span><b>SDG 13 · Climate Action</b><i /> <span>SUPPORTING</span><b>7 · 9 · 11 · 12</b></div>
+            <div className="sdg-line"><span>PRIMARY OUTCOME</span><b>SDG 13 · Climate Action</b><i /> <span>SUPPORTING</span><b>7 · 9 · 11 · 12 · modeled in workspace</b></div>
           </div>
         </div>
       </section>
@@ -372,7 +290,7 @@ export default function Home() {
         <div className="interventions-copy">
           <span className="eyebrow">INTERVENTION QUEUE</span>
           <h2>Compare the action, not the slogans.</h2>
-          <p>For the AIEM pilot, intervention cards are ranked as a decision-support view. The current browser model is illustrative; production actions require server-authoritative calculations and recorded evidence.</p>
+          <p>For the AIEM pilot, intervention cards start a decision path rather than rank a public mock calculation. Protected scenarios use server-authoritative calculations and retained evidence before actions are considered.</p>
           <img src="/manus-storage/ecosphere-scenario-table_022e21f9.jpg" alt="Field-journal workspace for an intervention scenario review" />
         </div>
         <div className="intervention-list">
@@ -407,15 +325,15 @@ export default function Home() {
             <h2>A credible prototype knows where its evidence ends.</h2>
           </div>
           <div className="pilot-notes">
-            <p><Check size={17}/> Today’s public demo uses deterministic simulated readings and a transparent browser-side calculation model.</p>
-            <p><Check size={17}/> The protected platform foundation now adds identity, tenant registry, audit events, and validated meter-reading ingestion.</p>
+            <p><Check size={17}/> Today’s public narrative uses explicitly simulated visual fixtures and does not produce public numerical sustainability claims.</p>
+            <p><Check size={17}/> The protected platform implements tenant registry, audit events, validated meter-reading ingestion, server monitoring, scenarios, targets, and evidence reports.</p>
             <p><Check size={17}/> It is not yet presented as a certified reporting system, live Odoo integration, monitored production tenant system, or guarantee of savings.</p>
-            <p><Check size={17}/> The next campus phase adds verified meters, factors, durable analytics workers, alerts, and measurement-after-action.</p>
+            <p><Check size={17}/> The next campus phase adds verified meters or connectors, deployed schedule proof, and measurement-after-action evidence.</p>
           </div>
         </div>
         <div className="closing-statement">
           <EcoSphereMark inverse compact />
-          <p>“EcoSphere AI now secures the path to persisted resource data; its next services detect change, run server-side scenarios, and explain the next action—without asking a language model to invent environmental numbers.”</p>
+          <p>“EcoSphere AI connects persisted resource evidence to server-side monitoring, scenarios, and accountable next actions—without asking a language model to invent environmental numbers.”</p>
         </div>
       </section>
 

@@ -5,9 +5,13 @@ const database = vi.hoisted(() => ({
   listReadingsForMonitoring: vi.fn(),
   listUnprocessedReadingsForMonitoring: vi.fn(),
   listApprovedEmissionFactors: vi.fn(),
+  listDataQualityRuleProfiles: vi.fn(),
+  listActiveOperatingCalendarWindows: vi.fn(),
   upsertQualityFindings: vi.fn(),
   createAnomalyIfAbsent: vi.fn(),
   createMonitoringAlertIfAbsent: vi.fn(),
+  getActiveMaintenanceWindow: vi.fn(),
+  markAnomalyAlertSuppressed: vi.fn(),
   upsertCarbonCalculation: vi.fn(),
   listOpenAnomalySeverities: vi.fn(),
   createEcoScoreSnapshot: vi.fn(),
@@ -36,6 +40,9 @@ describe("monitoring worker", () => {
     database.upsertQualityFindings.mockResolvedValue({ created: 4 });
     database.listOpenAnomalySeverities.mockResolvedValue([]);
     database.listApprovedEmissionFactors.mockResolvedValue([]);
+    database.listDataQualityRuleProfiles.mockResolvedValue([]);
+    database.listActiveOperatingCalendarWindows.mockResolvedValue([]);
+    database.getActiveMaintenanceWindow.mockResolvedValue(null);
   });
 
   it("skips an existing idempotency key without rescanning readings", async () => {
@@ -107,5 +114,36 @@ describe("monitoring worker", () => {
 
     expect(result).toMatchObject({ status: "completed", anomaliesCreated: 1 });
     expect(database.generateAnomalyRecommendations).toHaveBeenCalledWith({ organizationId: 8 });
+    expect(database.createAnomalyIfAbsent).toHaveBeenCalledWith(expect.objectContaining({ evidence: expect.objectContaining({ operatingCalendar: { state: "unconfigured", baselineBucket: "unconfigured", matchedWindowIds: [] } }) }));
+  });
+
+  it("partitions the anomaly baseline by configured off-hours without suppressing the resulting alert path", async () => {
+    const rows = [reading(1, 100, 1), reading(2, 100, 2), reading(3, 100, 3), reading(4, 170, 4)];
+    database.beginMonitoringRun.mockResolvedValue({ created: true });
+    database.listReadingsForMonitoring.mockResolvedValue(rows);
+    database.listUnprocessedReadingsForMonitoring.mockResolvedValue(rows);
+    database.listActiveOperatingCalendarWindows.mockResolvedValue([{ id: 45, meterId: 3, timezone: "Asia/Kolkata", weekdays: [0, 1, 2, 3, 4, 5, 6], startMinuteLocal: 9 * 60, endMinuteLocal: 18 * 60, isActive: true }]);
+    database.createAnomalyIfAbsent.mockResolvedValue({ created: true, anomalyId: 88 });
+    database.createMonitoringAlertIfAbsent.mockResolvedValue({ created: false, alertId: 0 });
+
+    await runMonitoringForOrganization({ organizationId: 8, runKey: "manual:off-hours-context", trigger: "manual" });
+
+    expect(database.createAnomalyIfAbsent).toHaveBeenCalledWith(expect.objectContaining({ evidence: expect.objectContaining({ operatingCalendar: { state: "outside_configured_hours", baselineBucket: "outside_configured_hours", matchedWindowIds: [] } }) }));
+    expect(database.createMonitoringAlertIfAbsent).toHaveBeenCalled();
+  });
+
+  it("retains a newly detected anomaly but suppresses its alert when the reading occurs inside a persisted maintenance window", async () => {
+    const rows = [reading(1, 100, 1), reading(2, 100, 2), reading(3, 100, 3), reading(4, 170, 4)];
+    database.beginMonitoringRun.mockResolvedValue({ created: true });
+    database.listReadingsForMonitoring.mockResolvedValue(rows);
+    database.listUnprocessedReadingsForMonitoring.mockResolvedValue(rows);
+    database.createAnomalyIfAbsent.mockResolvedValue({ created: true, anomalyId: 88 });
+    database.getActiveMaintenanceWindow.mockResolvedValue({ id: 77, meterId: 3, label: "HVAC maintenance" });
+
+    const result = await runMonitoringForOrganization({ organizationId: 8, runKey: "manual:maintenance-suppression", trigger: "manual" });
+
+    expect(result).toMatchObject({ status: "completed", anomaliesCreated: 1, alertsCreated: 0 });
+    expect(database.markAnomalyAlertSuppressed).toHaveBeenCalledWith({ organizationId: 8, anomalyId: 88, maintenanceWindowId: 77 });
+    expect(database.createMonitoringAlertIfAbsent).not.toHaveBeenCalled();
   });
 });

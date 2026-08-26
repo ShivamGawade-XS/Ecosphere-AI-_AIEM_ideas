@@ -24,6 +24,8 @@ const database = vi.hoisted(() => ({
   listSustainabilityScenarios: vi.fn(),
   getMonitoringStatus: vi.fn(),
   getMonitoringOverview: vi.fn(),
+  listMeterFreshness: vi.fn(),
+  getEcoScoreExplanation: vi.fn(),
   acknowledgeMonitoringAlert: vi.fn(),
   listDataImportFiles: vi.fn(),
   createEmissionFactor: vi.fn(),
@@ -67,6 +69,11 @@ const database = vi.hoisted(() => ({
   assessSustainabilityTargets: vi.fn(),
   createSustainabilityTarget: vi.fn(),
   getEvidenceTimeline: vi.fn(),
+  listOperationalBaselines: vi.fn(),
+  createOperationalBaseline: vi.fn(),
+  getOperationalBaseline: vi.fn(),
+  listOutcomeMeasurements: vi.fn(),
+  createOutcomeMeasurement: vi.fn(),
 }));
 
 vi.mock("./db", () => database);
@@ -111,6 +118,11 @@ describe("EcoSphere core API", () => {
     vi.clearAllMocks();
     database.getOrganizationMembership.mockResolvedValue({ organizationId: 8, userId: 17, role: "operator" });
     database.getDb.mockResolvedValue({});
+    database.listOperationalBaselines.mockResolvedValue([]);
+    database.createOperationalBaseline.mockResolvedValue({ baseline: { id: 401 }, meter: { id: 44, resourceType: "energy", canonicalUnit: "kWh" } });
+    database.getOperationalBaseline.mockResolvedValue({ baseline: { id: 401, meterId: 44, resourceType: "energy", unit: "kWh", aggregateValue: "100.0000", windowStart: new Date("2026-08-01T00:00:00.000Z"), windowEnd: new Date("2026-08-31T23:59:59.999Z"), includesSimulatedEvidence: false }, meter: { id: 44 } });
+    database.listOutcomeMeasurements.mockResolvedValue([]);
+    database.createOutcomeMeasurement.mockResolvedValue({ id: 501, status: "comparable", results: { observedReductionValue: 16 } });
     database.getMeterById.mockResolvedValue({ id: 44, organizationId: 8, siteId: 13, canonicalUnit: "kWh", isActive: true });
     database.ingestReading.mockResolvedValue({ reading: { id: 99 }, idempotent: false });
     database.listOrganizationsForUser.mockResolvedValue([{ organization: { id: 8, name: "AIEM Campus" }, membership: { role: "owner" } }]);
@@ -129,6 +141,8 @@ describe("EcoSphere core API", () => {
     database.listSustainabilityScenarios.mockResolvedValue([]);
     database.getMonitoringStatus.mockResolvedValue({ latestRun: null, latestScore: null, openAlertCount: 0 });
     database.getMonitoringOverview.mockResolvedValue({ status: { latestRun: null, latestScore: null, openAlertCount: 0 }, alerts: [], anomalies: [], qualityFindings: [], qualityWarnings: 0, qualityFailures: 0, carbonTotals: { totalKgCo2e: 0, calculationCount: 0 } });
+    database.listMeterFreshness.mockResolvedValue([]);
+    database.getEcoScoreExplanation.mockResolvedValue(null);
     database.acknowledgeMonitoringAlert.mockResolvedValue({ id: 55, status: "acknowledged" });
     database.listDataImportFiles.mockResolvedValue([{ id: 22, fileName: "readings.csv", validRows: 2, rejectedRows: 1 }]);
     database.createEmissionFactor.mockResolvedValue({ id: 31 });
@@ -314,6 +328,22 @@ describe("EcoSphere core API", () => {
     expect(database.createSustainabilityReportSnapshot).toHaveBeenCalledWith({ organizationId: 8, title: "August evidence", userId: 17 });
   });
 
+  it("optimizes only saved tenant scenarios against explicit portfolio constraints", async () => {
+    database.listSustainabilityScenarios.mockResolvedValue([
+      { id: 84, name: "LED upgrade", assumptions: { investmentInr: 20_000 }, results: { carbonReductionKg: 80, annualSavingsInr: 6_000, paybackYears: 3 } },
+      { id: 85, name: "HVAC controls", assumptions: { investmentInr: 35_000 }, results: { carbonReductionKg: 160, annualSavingsInr: 9_000, paybackYears: 4 } },
+      { id: 86, name: "Solar", assumptions: { investmentInr: 70_000 }, results: { carbonReductionKg: 300, annualSavingsInr: 10_000, paybackYears: 7 } },
+    ]);
+    const caller = appRouter.createCaller(createAuthenticatedContext());
+
+    await expect(caller.comparisons.optimizePortfolio({ organizationId: 8, scenarioIds: [84, 85, 86], budgetInr: 55_000, maxInterventions: 2, objective: "carbon_reduction" })).resolves.toMatchObject({
+      version: "deterministic-portfolio-v1",
+      selected: [{ scenarioId: 84 }, { scenarioId: 85 }],
+      totals: { investmentInr: 55_000, carbonReductionKg: 240, annualSavingsInr: 15_000 },
+    });
+    await expect(caller.comparisons.optimizePortfolio({ organizationId: 8, scenarioIds: [84, 999], budgetInr: 55_000, maxInterventions: 2, objective: "carbon_reduction" })).rejects.toMatchObject<Partial<TRPCError>>({ code: "NOT_FOUND" });
+  });
+
   it("refuses R3 operations before invoking persistence when the caller has no tenant membership", async () => {
     database.getOrganizationMembership.mockResolvedValueOnce(undefined);
     const caller = appRouter.createCaller(createAuthenticatedContext());
@@ -340,6 +370,28 @@ describe("EcoSphere core API", () => {
     expect(database.acknowledgeMonitoringAlert).toHaveBeenCalledWith({ organizationId: 8, alertId: 55, userId: 17 });
   });
 
+  it("returns active-meter freshness only for the caller's tenant", async () => {
+    database.listMeterFreshness.mockResolvedValueOnce([{ meter: { id: 44, displayName: "HVAC Electricity" }, latestAcceptedObservedAt: new Date("2026-08-25T10:00:00.000Z"), freshness: { state: "fresh", ageHours: 2 } }]);
+    const caller = appRouter.createCaller(createAuthenticatedContext());
+    await expect(caller.analytics.meterFreshness({ organizationId: 8 })).resolves.toMatchObject([{ meter: { id: 44 }, freshness: { state: "fresh" } }]);
+    expect(database.listMeterFreshness).toHaveBeenCalledWith(8);
+
+    database.getOrganizationMembership.mockResolvedValueOnce(undefined);
+    await expect(caller.analytics.meterFreshness({ organizationId: 9 })).rejects.toMatchObject<Partial<TRPCError>>({ code: "FORBIDDEN" });
+    expect(database.listMeterFreshness).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns the latest persisted EcoScore explanation only for the caller's tenant", async () => {
+    database.getEcoScoreExplanation.mockResolvedValueOnce({ snapshot: { id: 31, score: 78, calculationVersion: "ecoscore-v1" }, penalties: [{ id: "quality", value: 10 }], evidence: [], disclosure: "Pilot score." });
+    const caller = appRouter.createCaller(createAuthenticatedContext());
+    await expect(caller.analytics.ecoScoreExplanation({ organizationId: 8 })).resolves.toMatchObject({ snapshot: { id: 31, score: 78 }, penalties: [{ id: "quality", value: 10 }] });
+    expect(database.getEcoScoreExplanation).toHaveBeenCalledWith(8);
+
+    database.getOrganizationMembership.mockResolvedValueOnce(undefined);
+    await expect(caller.analytics.ecoScoreExplanation({ organizationId: 9 })).rejects.toMatchObject<Partial<TRPCError>>({ code: "FORBIDDEN" });
+    expect(database.getEcoScoreExplanation).toHaveBeenCalledTimes(1);
+  });
+
   it("calculates a deterministic server-owned scenario preview", async () => {
     const caller = appRouter.createCaller(createAuthenticatedContext());
     const result = await caller.scenarios.preview({
@@ -351,6 +403,24 @@ describe("EcoSphere core API", () => {
     expect(result.results).toMatchObject({ projectedEnergyKwh: 90, baselineCarbonKg: 91.59, projectedCarbonKg: 83.39, carbonReductionKg: 8.2 });
   });
 
+  it("returns the exact server-owned scenario methodology only to tenant members", async () => {
+    const caller = appRouter.createCaller(createAuthenticatedContext());
+    await expect(caller.scenarios.methodology({ organizationId: 8 })).resolves.toMatchObject({ calculationVersion: "pilot-v1", factors: { electricityKgCo2PerKwh: 0.82 }, formulas: { projectedResource: expect.stringContaining("baseline resource") } });
+
+    database.getOrganizationMembership.mockResolvedValueOnce(undefined);
+    await expect(caller.scenarios.methodology({ organizationId: 9 })).rejects.toMatchObject<Partial<TRPCError>>({ code: "FORBIDDEN" });
+  });
+
+  it("returns an explicit deterministic sensitivity range and rejects inverted conservative/favorable assumptions", async () => {
+    const caller = appRouter.createCaller(createAuthenticatedContext());
+    const assumptions = { baselineEnergyKwh: 100, baselineWaterM3: 10, baselineWasteKg: 10, energyReductionPct: 20, renewableSharePct: 0, waterReductionPct: 10, wasteReductionPct: 10, recyclingPct: 0, investmentInr: 1_000 };
+    const conservative = { performancePct: 70, capexMultiplier: 1.2, tariffMultiplier: 0.9, carbonFactorMultiplier: 0.9 };
+    const favorable = { performancePct: 110, capexMultiplier: 0.8, tariffMultiplier: 1.1, carbonFactorMultiplier: 1.1 };
+
+    await expect(caller.scenarios.sensitivity({ organizationId: 8, assumptions, conservative, favorable })).resolves.toMatchObject({ version: "pilot-sensitivity-v1", results: [{ label: "conservative" }, { label: "base" }, { label: "favorable" }] });
+    await expect(caller.scenarios.sensitivity({ organizationId: 8, assumptions, conservative: { ...conservative, performancePct: 120 }, favorable })).rejects.toMatchObject<Partial<TRPCError>>({ code: "BAD_REQUEST" });
+  });
+
   it("persists a scenario with the server calculation and authenticated actor", async () => {
     const caller = appRouter.createCaller(createAuthenticatedContext());
     const assumptions = { baselineEnergyKwh: 100, baselineWaterM3: 10, baselineWasteKg: 10, energyReductionPct: 10, renewableSharePct: 0, waterReductionPct: 0, wasteReductionPct: 0, recyclingPct: 0, investmentInr: 1_000 };
@@ -358,6 +428,36 @@ describe("EcoSphere core API", () => {
 
     expect(result.scenario).toEqual({ id: 84 });
     expect(database.createSustainabilityScenario).toHaveBeenCalledWith(expect.objectContaining({ organizationId: 8, name: "HVAC option", userId: 17, calculationVersion: "pilot-v1", results: expect.objectContaining({ carbonReductionKg: 8.2 }) }));
+  });
+
+  it("creates tenant-scoped operational baselines for mutable roles and rejects forged saved-baseline scenario evidence", async () => {
+    const caller = appRouter.createCaller(createAuthenticatedContext());
+    expect(await caller.baselines.list({ organizationId: 8 })).toEqual([]);
+    await expect(caller.baselines.create({ organizationId: 8, meterId: 44, label: "August HVAC evidence", windowStart: new Date("2026-08-01T00:00:00.000Z"), windowEnd: new Date("2026-08-31T23:59:59.999Z") })).resolves.toMatchObject({ baseline: { id: 401 } });
+    expect(database.createOperationalBaseline).toHaveBeenCalledWith(expect.objectContaining({ organizationId: 8, meterId: 44, userId: 17 }));
+    database.createOperationalBaseline.mockRejectedValueOnce(new Error("No accepted readings exist for this meter in the selected UTC window."));
+    await expect(caller.baselines.create({ organizationId: 8, meterId: 44, label: "Empty evidence window", windowStart: new Date("2026-07-01T00:00:00.000Z"), windowEnd: new Date("2026-07-31T23:59:59.999Z") })).rejects.toMatchObject<Partial<TRPCError>>({ code: "BAD_REQUEST", message: "No accepted readings exist for this meter in the selected UTC window." });
+
+    await expect(caller.scenarios.preview({ organizationId: 8, assumptions: { baselineEnergyKwh: 101, baselineWaterM3: 10, baselineWasteKg: 10, energyReductionPct: 10, renewableSharePct: 0, waterReductionPct: 0, wasteReductionPct: 0, recyclingPct: 0, investmentInr: 1000, baselineReference: { baselineId: 401, meterId: 44, resourceType: "energy", aggregateValue: 100, unit: "kWh", windowStart: "2026-08-01T00:00:00.000Z", windowEnd: "2026-08-31T23:59:59.999Z", includesSimulatedEvidence: false } } })).rejects.toMatchObject<Partial<TRPCError>>({ code: "BAD_REQUEST" });
+    database.getOperationalBaseline.mockResolvedValueOnce(undefined);
+    await expect(caller.scenarios.preview({ organizationId: 8, assumptions: { baselineEnergyKwh: 100, baselineWaterM3: 10, baselineWasteKg: 10, energyReductionPct: 10, renewableSharePct: 0, waterReductionPct: 0, wasteReductionPct: 0, recyclingPct: 0, investmentInr: 1000, baselineReference: { baselineId: 999, meterId: 44, resourceType: "energy", aggregateValue: 100, unit: "kWh", windowStart: "2026-08-01T00:00:00.000Z", windowEnd: "2026-08-31T23:59:59.999Z", includesSimulatedEvidence: false } } })).rejects.toMatchObject<Partial<TRPCError>>({ code: "NOT_FOUND" });
+  });
+
+  it("creates a tenant-scoped locked outcome measurement only through the protected evidence contract", async () => {
+    const caller = appRouter.createCaller(createAuthenticatedContext());
+    const outcomeWindowStart = new Date("2026-09-01T00:00:00.000Z");
+    const outcomeWindowEnd = new Date("2026-09-30T23:59:59.999Z");
+
+    await expect(caller.outcomes.list({ organizationId: 8 })).resolves.toEqual([]);
+    await expect(caller.outcomes.create({ organizationId: 8, actionId: 71, baselineId: 401, outcomeWindowStart, outcomeWindowEnd })).resolves.toMatchObject({ id: 501, status: "comparable" });
+    expect(database.createOutcomeMeasurement).toHaveBeenCalledWith({ organizationId: 8, actionId: 71, baselineId: 401, outcomeWindowStart, outcomeWindowEnd, userId: 17 });
+
+    database.createOutcomeMeasurement.mockRejectedValueOnce(new Error("Complete the action before recording an outcome measurement."));
+    await expect(caller.outcomes.create({ organizationId: 8, actionId: 71, baselineId: 401, outcomeWindowStart, outcomeWindowEnd })).rejects.toMatchObject<Partial<TRPCError>>({ code: "BAD_REQUEST", message: "Complete the action before recording an outcome measurement." });
+
+    database.getOrganizationMembership.mockResolvedValueOnce(undefined);
+    await expect(caller.outcomes.create({ organizationId: 9, actionId: 71, baselineId: 401, outcomeWindowStart, outcomeWindowEnd })).rejects.toMatchObject<Partial<TRPCError>>({ code: "FORBIDDEN" });
+    expect(database.createOutcomeMeasurement).toHaveBeenCalledTimes(2);
   });
 
   it("persists authorized scenario and comparison attribution when creating an action", async () => {

@@ -16,6 +16,22 @@ export const PILOT_FACTORS = {
   wasteCostInrPerKg: 8,
 } as const;
 
+export function getScenarioMethodology() {
+  return {
+    calculationVersion: SCENARIO_CALCULATION_VERSION,
+    factors: PILOT_FACTORS,
+    formulas: {
+      projectedResource: "baseline resource × (1 − reduction percentage)",
+      projectedCarbon: "projected energy × electricity factor × (1 − renewable share) + projected water × water factor + projected waste × waste factor × (1 − recycling percentage)",
+      annualSavings: "resource reduction × displayed resource cost factor, summed across energy, water, and waste",
+      roi: "((three years of modeled annual savings − investment) ÷ investment) × 100",
+      payback: "investment ÷ modeled annual savings",
+    },
+    sensitivity: "Conservative, base, and favorable cases vary only the displayed delivery performance, capex, tariff, and carbon-factor multipliers. They are server-calculated deterministic ranges.",
+    limitations: "Pilot factors are prototype defaults, not regional emissions-factor claims, procurement quotations, predictive guarantees, certified reporting, or realized savings.",
+  };
+}
+
 const round = (value: number) => Math.round(value * 10_000) / 10_000;
 
 export function calculateScenario(assumptions: ScenarioAssumptions): ScenarioResults {

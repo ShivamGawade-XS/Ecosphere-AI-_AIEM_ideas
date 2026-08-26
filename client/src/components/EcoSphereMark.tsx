@@ -1,8 +1,8 @@
-import React, { useState } from "react";
+import React from "react";
 
 /**
  * Field Operations Ledger style: a compact orbital field-marker presentation
- * using the generated transparent EcoSphere symbol and precise brand typography.
+ * using a self-contained vector field marker and precise brand typography.
  */
 type EcoSphereMarkProps = {
   inverse?: boolean;
@@ -10,15 +10,15 @@ type EcoSphereMarkProps = {
 };
 
 export default function EcoSphereMark({ inverse = false, compact = false }: EcoSphereMarkProps) {
-  const [markerUnavailable, setMarkerUnavailable] = useState(false);
   return (
     <div className={`brand-lockup ${inverse ? "brand-lockup--inverse" : ""} ${compact ? "brand-lockup--compact" : ""}`}>
-      {markerUnavailable ? <span className="brand-mark brand-mark--fallback" aria-hidden="true">ES</span> : <img
-        className="brand-mark"
-        src="/manus-storage/ecosphere-field-marker_4829d44d.png"
-        alt="EcoSphere AI field marker"
-        onError={() => setMarkerUnavailable(true)}
-      />}
+      <svg className="brand-mark" viewBox="0 0 36 36" role="img" aria-label="EcoSphere AI field marker">
+        <circle cx="18" cy="18" r="14.5" fill="none" stroke="currentColor" strokeWidth="1.4" opacity=".78" />
+        <circle cx="18" cy="18" r="8.5" fill="none" stroke="currentColor" strokeWidth="1.4" opacity=".65" />
+        <path d="M18 5.5v25M5.5 18h25" fill="none" stroke="currentColor" strokeWidth="1.2" opacity=".45" />
+        <path d="M22.8 11.2c-5.9.2-9.5 3.1-10.8 9.5 5.7-.2 9.5-3 10.8-9.5Z" fill="currentColor" />
+        <circle cx="18" cy="18" r="2.3" fill="var(--chartreuse, #b5cf4d)" stroke="currentColor" strokeWidth="1" />
+      </svg>
       {!compact && (
         <span className="brand-name" aria-label="EcoSphere AI">
           EcoSphere <b>AI</b>
